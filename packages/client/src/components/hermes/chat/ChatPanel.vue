@@ -13,6 +13,7 @@ import {
 } from "@/api/studio/sessions";
 import type { AvailableModelGroup } from "@/api/hermes/system";
 import { fetchCodingAgentsStatus, inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId, type CodingAgentApiMode, type CodingAgentId } from "@/api/coding-agents";
+import { fetchRuntimeVersionStatus } from "@/api/hermes/runtime-versions";
 import { useChatStore, type Session } from "@/stores/hermes/chat";
 import { useAppStore } from "@/stores/hermes/app";
 import { useProfilesStore } from "@/stores/hermes/profiles";
@@ -66,7 +67,7 @@ import {
 
 const props = withDefaults(defineProps<{
   standalone?: boolean;
-  contentMode?: "chat" | "connections";
+  contentMode?: "chat" | "connections" | "agents" | "models";
 }>(), {
   standalone: false,
   contentMode: "chat",
@@ -74,6 +75,8 @@ const props = withDefaults(defineProps<{
 
 const FilesPanel = defineAsyncComponent(async () => (await import('./FilesPanel.vue')).default);
 const ConnectionsPanel = defineAsyncComponent(async () => (await import('@/components/hermes/connections/ConnectionsPanel.vue')).default);
+const AgentManagerPanel = defineAsyncComponent(async () => (await import('@/views/hermes/AgentManagerView.vue')).default);
+const ModelsPanel = defineAsyncComponent(async () => (await import('@/views/hermes/ModelsView.vue')).default);
 const WorkspaceDiffPreview = defineAsyncComponent(async () => (await import('@/components/hermes/files/WorkspaceDiffPreview.vue')).default);
 const DesktopBrowserPanel = defineAsyncComponent(async () => (await import('./DesktopBrowserPanel.vue')).default);
 
@@ -328,7 +331,13 @@ async function submitBrowserAnnotations(payload: BrowserAnnotationSubmission): P
   return true;
 }
 
-async function handleSessionClick(sessionId: string) {
+async function handleSessionClick(
+  sessionId: string,
+  options: { preserveCategoryCollapse?: boolean } = {},
+) {
+  if (!options.preserveCategoryCollapse) {
+    setCategoryRevealSuppressedSessionId(null);
+  }
   chatStore.clearSessionCompletedUnread(sessionId);
   await router.push({
     name: chatStore.runtimeMode === "global_agent" ? "hermes.globalAgentSession" : "hermes.session",
@@ -342,8 +351,8 @@ async function handleSessionClick(sessionId: string) {
 
 async function handleRecentSessionClick(sessionId: string) {
   // Recent is a shortcut; selecting it must not overwrite the real category's saved collapse state.
-  categoryRevealSuppressedSessionId.value = sessionId;
-  await handleSessionClick(sessionId);
+  setCategoryRevealSuppressedSessionId(sessionId);
+  await handleSessionClick(sessionId, { preserveCategoryCollapse: true });
 }
 
 function handleMobileChange(e: MediaQueryListEvent | MediaQueryList) {
@@ -527,6 +536,7 @@ const sessionCategoriesLoaded = ref(false);
 const sessionCategoriesLoadFailed = ref(false);
 let sessionCategoriesLoadPromise: Promise<void> | null = null;
 const COLLAPSED_CATEGORIES_STORAGE_KEY = "hermes_chat_collapsed_categories";
+const RECENT_CATEGORY_REVEAL_SUPPRESSION_STORAGE_KEY = "hermes_chat_recent_category_reveal_suppression";
 const showRecentCountModal = ref(false);
 const recentCountDraft = ref(sessionBrowserPrefsStore.recentCount);
 
@@ -540,7 +550,31 @@ function loadCollapsedCategories(): Set<string> {
 }
 
 const collapsedCategories = ref<Set<string>>(loadCollapsedCategories());
-const categoryRevealSuppressedSessionId = ref<string | null>(null);
+
+function loadCategoryRevealSuppressedSessionId(): string | null {
+  try {
+    return sessionStorage.getItem(RECENT_CATEGORY_REVEAL_SUPPRESSION_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+const categoryRevealSuppressedSessionId = ref<string | null>(
+  loadCategoryRevealSuppressedSessionId(),
+);
+
+function setCategoryRevealSuppressedSessionId(sessionId: string | null) {
+  categoryRevealSuppressedSessionId.value = sessionId;
+  try {
+    if (sessionId) {
+      sessionStorage.setItem(RECENT_CATEGORY_REVEAL_SUPPRESSION_STORAGE_KEY, sessionId);
+    } else {
+      sessionStorage.removeItem(RECENT_CATEGORY_REVEAL_SUPPRESSION_STORAGE_KEY);
+    }
+  } catch {
+    // Keep the in-memory behavior when session storage is unavailable.
+  }
+}
 
 function persistCollapsedCategories() {
   localStorage.setItem(
@@ -646,7 +680,7 @@ watch(
     if (!sessionCategoriesLoaded.value || categorizedSessions.value.length === 0) return;
     const activeSession = chatStore.sessions.find((session) => session.id === chatStore.activeSessionId);
     if (categoryRevealSuppressedSessionId.value === activeSession?.id) return;
-    categoryRevealSuppressedSessionId.value = null;
+    setCategoryRevealSuppressedSessionId(null);
     const activeKey = activeSession?.categoryId == null
       ? "category-none"
       : `category-${activeSession.categoryId}`;
@@ -1156,6 +1190,25 @@ function handleNewChatProviderChange(value: string) {
 }
 
 async function confirmNewChat() {
+  if (newChatAgent.value === "hermes") {
+    newChatLoading.value = true;
+    try {
+      const status = await fetchRuntimeVersionStatus({ probeRuntime: false, includeRemote: false });
+      const selectedCli = status.hermes.cliInstallations.find((item) => item.selected);
+      if (!status.hermes.agentVersion && !selectedCli?.version) {
+        showNewChatModal.value = false;
+        await router.push({ name: "hermes.agentManager", query: { runtime: "install" } });
+        return;
+      }
+    } catch {
+      showNewChatModal.value = false;
+      await router.push({ name: "hermes.agentManager", query: { runtime: "install" } });
+      return;
+    } finally {
+      newChatLoading.value = false;
+    }
+  }
+
   if (isNewChatExternalCodingAgent.value) {
     newChatLoading.value = true;
     try {
@@ -1166,7 +1219,7 @@ async function confirmNewChat() {
         const fallbackName = agentId === "codex" ? "Codex" : agentId === "pi" ? "Pi" : "Claude";
         message.warning(t("codingAgents.installRequired", { agent: tool?.name || fallbackName }));
         showNewChatModal.value = false;
-        await router.push({ name: "hermes.codingAgents" });
+        await router.push({ name: "hermes.agentManager" });
         return;
       }
     } catch {
@@ -1940,7 +1993,7 @@ async function handleSessionModelCustomSubmit() {
     >
       <div v-if="showSessions" class="page-sidebar-top">
         <PageSidebarNav
-          :active="contentMode === 'connections' ? 'connections' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
+          :active="contentMode === 'connections' ? 'connections' : contentMode === 'agents' ? 'agents' : contentMode === 'models' ? 'models' : chatStore.runtimeMode === 'global_agent' ? 'global' : 'chat'"
           :primary-label="t('chat.newChat')"
           @primary="openNewChatModal"
         />
@@ -2718,6 +2771,16 @@ async function handleSessionModelCustomSubmit() {
     >
       <ConnectionsPanel
         v-if="contentMode === 'connections'"
+        :sidebar-collapsed="!showSessions"
+        @toggle-sidebar="showSessions = !showSessions"
+      />
+      <AgentManagerPanel
+        v-else-if="contentMode === 'agents'"
+        :sidebar-collapsed="!showSessions"
+        @toggle-sidebar="showSessions = !showSessions"
+      />
+      <ModelsPanel
+        v-else-if="contentMode === 'models'"
         :sidebar-collapsed="!showSessions"
         @toggle-sidebar="showSessions = !showSessions"
       />

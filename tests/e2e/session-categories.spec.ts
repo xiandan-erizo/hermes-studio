@@ -139,6 +139,14 @@ test('selects a recent session without expanding its collapsed category', async 
   await expect(page.getByRole('link', { name: /Project Alpha/ })).toHaveCount(1)
   await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_chat_collapsed_categories')))
     .toContain('category-1')
+
+  await page.reload()
+
+  await expect(page).toHaveURL(/\/hermes\/session\/work-session$/)
+  await expect(page.getByRole('link', { name: /Project Alpha/ }).first()).toHaveClass(/active/)
+  await expect(page.getByRole('link', { name: /Project Alpha/ })).toHaveCount(1)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('hermes_chat_collapsed_categories')))
+    .toContain('category-1')
 })
 
 test('persists the collapsed recent group across reloads without changing the active session', async ({ page }) => {
@@ -240,6 +248,7 @@ test('creates a category in the new chat selector and sends its id with the firs
   await expect(page.getByText('Category "Client Work" created')).toBeVisible()
 
   await page.getByRole('button', { name: 'Create', exact: true }).click()
+  await expect(page).toHaveURL(/#\/hermes\/session\//)
   const input = page.getByPlaceholder('Type a message... (Enter to send, Shift+Enter for new line)')
   await input.fill('Prepare the weekly summary')
   await page.getByRole('button', { name: 'Send' }).click()

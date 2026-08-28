@@ -60,6 +60,7 @@ import { performanceMonitorRoutes } from '../modules/studio/routes/performance-m
 import { journeyRoutes } from '../modules/hermes/routes/journey'
 import { mcpRoutes } from '../modules/hermes/routes/mcp'
 import { runtimeVersionRoutes } from '../modules/hermes/routes/runtime-versions'
+import { agentStatusRoutes } from '../modules/studio/routes/agent-status'
 import { writeGateRoutes } from '../modules/hermes/routes/write-gate'
 import { petdexPublicRoutes, petdexRoutes } from '../modules/studio/routes/petdex'
 import { petRoutes } from '../modules/studio/routes/pets'
@@ -120,6 +121,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(appConnectionRoutes.routes())
   app.use(updateRoutes.routes())           // Must be before proxy (proxy catch-all matches everything)
   app.use(codingAgentRoutes.routes())
+  app.use(agentStatusRoutes.routes())
   app.use(appRelayRoutes.routes())
   app.use(socialMessageRoutes.routes())
   app.use(profileRoutes.routes())

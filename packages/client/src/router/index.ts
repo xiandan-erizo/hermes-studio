@@ -76,11 +76,13 @@ const router = createRouter({
       path: '/hermes/jobs',
       name: 'hermes.jobs',
       component: () => import('@/views/hermes/JobsView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/kanban',
       name: 'hermes.kanban',
       component: () => import('@/views/hermes/KanbanView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/workflow',
@@ -90,8 +92,7 @@ const router = createRouter({
     {
       path: '/hermes/models',
       name: 'hermes.models',
-      component: () => import('@/views/hermes/ModelsView.vue'),
-      meta: { requiresElevated: true },
+      component: () => import('@/views/hermes/ChatView.vue'),
     },
     {
       path: '/hermes/profiles',
@@ -121,6 +122,7 @@ const router = createRouter({
       path: '/hermes/journey',
       name: 'hermes.journey',
       component: () => import('@/views/hermes/JourneyView.vue'),
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/skills-usage',
@@ -132,13 +134,13 @@ const router = createRouter({
       path: '/hermes/skills',
       name: 'hermes.skills',
       component: () => import('@/views/hermes/SkillsView.vue'),
-      meta: { requiresElevated: true },
+      meta: { requiresElevated: true, hermesConfig: true },
     },
     {
       path: '/hermes/plugins',
       name: 'hermes.plugins',
       component: () => import('@/views/hermes/PluginsView.vue'),
-      meta: { requiresElevated: true },
+      meta: { requiresElevated: true, hermesConfig: true },
     },
     {
       path: '/hermes/petdex',
@@ -149,7 +151,13 @@ const router = createRouter({
       path: '/hermes/memory',
       name: 'hermes.memory',
       component: () => import('@/views/hermes/MemoryView.vue'),
-      meta: { requiresElevated: true },
+      meta: { requiresElevated: true, hermesConfig: true },
+    },
+    {
+      path: '/hermes/config/settings',
+      name: 'hermes.configSettings',
+      component: () => import('@/views/hermes/HermesSettingsView.vue'),
+      meta: { requiresElevated: true, hermesConfig: true },
     },
     {
       path: '/hermes/settings',
@@ -165,7 +173,7 @@ const router = createRouter({
       path: '/hermes/channels',
       name: 'hermes.channels',
       component: () => import('@/views/hermes/ChannelsView.vue'),
-      meta: { requiresElevated: true },
+      meta: { requiresElevated: true, hermesConfig: true },
     },
     {
       path: '/social-messages',
@@ -193,6 +201,16 @@ const router = createRouter({
         query: { ...to.query, tab: 'devices' },
       }),
       meta: { requiresSuperAdmin: true },
+    },
+    {
+      path: '/studio/agents',
+      name: 'hermes.agentManager',
+      component: () => import('@/views/hermes/ChatView.vue'),
+      meta: { requiresSuperAdmin: true },
+    },
+    {
+      path: '/hermes/agents',
+      redirect: { name: 'hermes.agentManager' },
     },
     {
       path: '/hermes/group-chat',
@@ -226,8 +244,7 @@ const router = createRouter({
     {
       path: '/hermes/coding-agents',
       name: 'hermes.codingAgents',
-      component: () => import('@/views/hermes/CodingAgentsView.vue'),
-      meta: { requiresElevated: true },
+      redirect: { name: 'hermes.agentManager' },
     },
     {
       path: '/hermes/version-preview',
@@ -239,7 +256,7 @@ const router = createRouter({
       path: '/hermes/mcp',
       name: 'hermes.mcp',
       component: () => import('@/views/hermes/McpManagerView.vue'),
-      meta: { requiresElevated: true },
+      meta: { requiresElevated: true, hermesConfig: true },
     },
   ],
 })
