@@ -3,7 +3,7 @@ import { ref, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { setApiKey, clearApiKey, hasApiKey } from "@/api/client";
-import { fetchAuthStatus, loginWithPassword } from "@/api/studio/auth";
+import { fetchAuthStatus, fetchSsoStatus, loginWithPassword, buildSsoRedirectUrl } from "@/api/studio/auth";
 import { isDesktopShell } from "@/utils/desktop-bridge";
 import { resolveLoginRedirect } from "@/utils/login-redirect";
 import { useTheme } from "@/composables/useTheme";
@@ -19,6 +19,7 @@ const loading = ref(false);
 const errorMsg = ref("");
 const showLockResetHint = ref(false);
 const desktopShell = isDesktopShell();
+const ssoEnabled = ref(false);
 
 if (desktopShell) {
   // Desktop login is a recovery path. Drop stale JWTs before any background
@@ -29,8 +30,35 @@ if (desktopShell) {
 }
 
 onMounted(async () => {
+  // The SSO callback lands on /?token=... which main.ts stashes on window.
+  const loginToken = (window as typeof window & { __LOGIN_TOKEN__?: string }).__LOGIN_TOKEN__;
+  if (loginToken && !desktopShell) {
+    (window as any).__LOGIN_TOKEN__ = undefined;
+    window.history.replaceState({}, "", window.location.pathname + window.location.hash);
+    setApiKey(loginToken);
+    router.replace(resolveLoginRedirect(route.query.redirect));
+    return;
+  }
+
+  const ssoError = typeof route.query.sso_error === "string" ? route.query.sso_error : "";
+  if (ssoError) {
+    const knownErrors = [
+      'invite_unavailable',
+      'sso_unavailable',
+      'sso_state_invalid',
+      'sso_failed',
+      'access_denied',
+      'account_disabled',
+    ]
+    errorMsg.value = knownErrors.includes(ssoError)
+      ? t(`login.ssoErrors.${ssoError}`)
+      : t('login.ssoFailed');
+  }
+
   try {
     await fetchAuthStatus();
+    const sso = await fetchSsoStatus().catch(() => ({ enabled: false }));
+    ssoEnabled.value = sso.enabled;
   } catch {
     // Login remains available; the submit request will surface connection errors.
   }
@@ -38,6 +66,10 @@ onMounted(async () => {
 
 async function handleLogin() {
   await handlePasswordLogin();
+}
+
+function handleSsoLogin() {
+  window.location.href = buildSsoRedirectUrl();
 }
 
 async function handlePasswordLogin() {
@@ -110,6 +142,13 @@ async function handlePasswordLogin() {
           {{ loading ? "..." : t("login.submit") }}
         </button>
       </form>
+
+      <div v-if="ssoEnabled" class="login-divider">
+        <span>{{ t("login.orDivider") }}</span>
+      </div>
+      <button v-if="ssoEnabled" type="button" class="login-btn login-btn-sso" @click="handleSsoLogin">
+        {{ t("login.ssoLogin") }}
+      </button>
     </div>
   </div>
 </template>
@@ -236,6 +275,30 @@ async function handlePasswordLogin() {
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+.login-btn-sso {
+  margin-top: 14px;
+  background: $bg-input;
+  color: $text-primary;
+  border: 1px solid $border-color;
+}
+
+.login-divider {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: $text-muted;
+  font-size: 12px;
+
+  &::before,
+  &::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: $border-color;
   }
 }
 </style>

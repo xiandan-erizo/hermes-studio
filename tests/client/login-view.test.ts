@@ -11,6 +11,7 @@ const mockHasApiKey = vi.hoisted(() => vi.fn())
 const mockIsDesktopShell = vi.hoisted(() => vi.fn())
 const mockActivateUserTheme = vi.hoisted(() => vi.fn())
 const mockRoute = vi.hoisted(() => ({ query: {} as Record<string, unknown> }))
+const mockFetchSsoStatus = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({
@@ -34,6 +35,8 @@ vi.mock('@/api/client', () => ({
 vi.mock('@/api/studio/auth', () => ({
   fetchAuthStatus: mockFetchAuthStatus,
   loginWithPassword: mockLoginWithPassword,
+  fetchSsoStatus: mockFetchSsoStatus,
+  buildSsoRedirectUrl: vi.fn(() => '/api/auth/sso/redirect'),
 }))
 
 vi.mock('@/utils/desktop-bridge', () => ({
@@ -56,6 +59,7 @@ describe('LoginView password login', () => {
     mockRoute.query = {}
     mockHasApiKey.mockReturnValue(false)
     mockFetchAuthStatus.mockResolvedValue({ hasPasswordLogin: true, username: 'admin' })
+    mockFetchSsoStatus.mockResolvedValue({ enabled: false })
   })
 
   it('keeps the web login redirect when a token already exists', () => {

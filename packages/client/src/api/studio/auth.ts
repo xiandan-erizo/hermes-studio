@@ -111,8 +111,121 @@ export async function removePassword(): Promise<void> {
   })
 }
 
-export type UserRole = 'super_admin' | 'admin'
+export type UserRole = 'super_admin' | 'admin' | 'user'
 export type UserStatus = 'active' | 'disabled'
+
+export interface SsoStatus {
+  enabled: boolean
+}
+
+export async function fetchSsoStatus(): Promise<SsoStatus> {
+  const res = await fetch('/api/auth/sso/status')
+  if (!res.ok) return { enabled: false }
+  return res.json() as Promise<SsoStatus>
+}
+
+export interface InviteInfo {
+  code: string
+  profile: string
+  status: 'active' | 'revoked' | 'expired'
+  expires_at: number | null
+}
+
+export async function fetchInviteInfo(code: string): Promise<InviteInfo> {
+  const res = await fetch(`/api/auth/invites/${encodeURIComponent(code)}`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    const err: any = new Error(data.error || 'Invite unavailable')
+    err.status = res.status
+    throw err
+  }
+  const data = await res.json() as { invite: InviteInfo }
+  return data.invite
+}
+
+export interface InviteAcceptResponse {
+  token: string
+  userId: number
+  profile: string
+  profiles: string[]
+}
+
+export async function acceptInviteWithRegistration(
+  code: string,
+  username: string,
+  password: string,
+): Promise<InviteAcceptResponse> {
+  const res = await fetch(`/api/auth/invites/${encodeURIComponent(code)}/accept`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    const err: any = new Error(data.error || 'Failed to join')
+    err.status = res.status
+    throw err
+  }
+  return res.json() as Promise<InviteAcceptResponse>
+}
+
+export async function acceptInviteWithCurrentAccount(code: string): Promise<{ success: boolean; profile: string; profiles: string[] }> {
+  const res = await request(`/api/auth/invites/${encodeURIComponent(code)}/accept`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+  return res as { success: boolean; profile: string; profiles: string[] }
+}
+
+export interface ManagedInvite {
+  id: number
+  code: string
+  profile_name: string
+  created_by_user_id: number
+  use_count: number
+  max_uses: number
+  expires_at: number | null
+  revoked_at: number | null
+  created_at: number
+  updated_at: number
+  status: 'active' | 'revoked' | 'expired'
+  url: string
+}
+
+export interface ManagedInvitesResponse {
+  invites: ManagedInvite[]
+  profiles: string[]
+}
+
+export async function fetchInvites(): Promise<ManagedInvitesResponse> {
+  return request<ManagedInvitesResponse>('/api/auth/invites')
+}
+
+export async function createInvite(input: {
+  profile: string
+  expiresInDays?: number
+  maxUses?: number
+}): Promise<ManagedInvite> {
+  const res = await request<{ invite: ManagedInvite }>('/api/auth/invites', {
+    method: 'POST',
+    body: JSON.stringify({
+      profile_name: input.profile,
+      expiresInDays: input.expiresInDays,
+      maxUses: input.maxUses,
+    }),
+  })
+  return res.invite
+}
+
+export async function revokeInvite(code: string): Promise<void> {
+  await request(`/api/auth/invites/${encodeURIComponent(code)}`, { method: 'DELETE' })
+}
+
+export function buildSsoRedirectUrl(inviteCode?: string): string {
+  const base = localStorage.getItem('hermes_server_url') || ''
+  const suffix = inviteCode ? `?invite=${encodeURIComponent(inviteCode)}` : ''
+  return `${base}/api/auth/sso/redirect${suffix}`
+}
 
 export interface ManagedUser {
   id: number
