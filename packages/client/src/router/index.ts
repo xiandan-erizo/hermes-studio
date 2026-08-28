@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { hasApiKey, isStoredSuperAdmin } from '@/api/client'
+import { hasApiKey, isStoredSuperAdmin, isStoredElevatedUser } from '@/api/client'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
 import { resolveLoginRedirect } from '@/utils/login-redirect'
 
@@ -23,6 +23,12 @@ const router = createRouter({
       name: 'share.groupChat',
       component: () => import('@/views/hermes/SharedGroupChatView.vue'),
       meta: { public: true, standaloneChat: true, inviteOnly: true },
+    },
+    {
+      path: '/invite/:code',
+      name: 'invite.join',
+      component: () => import('@/views/InviteView.vue'),
+      meta: { public: true },
     },
     {
       path: '/group-chat-link',
@@ -85,6 +91,7 @@ const router = createRouter({
       path: '/hermes/models',
       name: 'hermes.models',
       component: () => import('@/views/hermes/ModelsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/profiles',
@@ -96,11 +103,13 @@ const router = createRouter({
       path: '/hermes/logs',
       name: 'hermes.logs',
       component: () => import('@/views/hermes/LogsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/usage',
       name: 'hermes.usage',
       component: () => import('@/views/hermes/UsageView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/performance',
@@ -117,16 +126,19 @@ const router = createRouter({
       path: '/hermes/skills-usage',
       name: 'hermes.skillsUsage',
       component: () => import('@/views/hermes/SkillsUsageView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/skills',
       name: 'hermes.skills',
       component: () => import('@/views/hermes/SkillsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/plugins',
       name: 'hermes.plugins',
       component: () => import('@/views/hermes/PluginsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/petdex',
@@ -137,6 +149,7 @@ const router = createRouter({
       path: '/hermes/memory',
       name: 'hermes.memory',
       component: () => import('@/views/hermes/MemoryView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/settings',
@@ -152,6 +165,7 @@ const router = createRouter({
       path: '/hermes/channels',
       name: 'hermes.channels',
       component: () => import('@/views/hermes/ChannelsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/social-messages',
@@ -213,6 +227,7 @@ const router = createRouter({
       path: '/hermes/coding-agents',
       name: 'hermes.codingAgents',
       component: () => import('@/views/hermes/CodingAgentsView.vue'),
+      meta: { requiresElevated: true },
     },
     {
       path: '/hermes/version-preview',
@@ -224,6 +239,7 @@ const router = createRouter({
       path: '/hermes/mcp',
       name: 'hermes.mcp',
       component: () => import('@/views/hermes/McpManagerView.vue'),
+      meta: { requiresElevated: true },
     },
   ],
 })
@@ -275,6 +291,11 @@ router.beforeEach(async (to, _from, next) => {
   }
 
   if (to.meta.requiresSuperAdmin && !isStoredSuperAdmin()) {
+    next({ name: 'hermes.chat' })
+    return
+  }
+
+  if (to.meta.requiresElevated && !isStoredElevatedUser()) {
     next({ name: 'hermes.chat' })
     return
   }

@@ -375,6 +375,45 @@ export async function requireAdmin(ctx: Context, next: Next): Promise<void> {
   await next()
 }
 
+/**
+ * Read-only endpoints the plain 'user' role may still call so the chat UI
+ * functions (controllers redact secrets for this role). Method + exact path.
+ */
+const USER_READABLE_API_PATHS: Array<{ method: string; path: string }> = [
+  { method: 'GET', path: '/api/hermes/profiles' },
+  { method: 'GET', path: '/api/hermes/available-models' },
+  { method: 'GET', path: '/api/hermes/config' },
+]
+
+function isUserReadablePath(ctx: Context): boolean {
+  const method = typeof ctx.method === 'string' ? ctx.method.toUpperCase() : ''
+  return USER_READABLE_API_PATHS.some(entry =>
+    entry.method === method && entry.path === ctx.path)
+}
+
+/**
+ * Route-group gate that blocks the plain 'user' role from management APIs.
+ * Unlike requireAdmin, requests outside /api and /v1 (SPA assets, static
+ * files) pass through untouched.
+ */
+export async function requireElevatedApi(ctx: Context, next: Next): Promise<void> {
+  if (!isProtectedHttpPath(ctx.path)) {
+    await next()
+    return
+  }
+  const role = ctx.state.user?.role
+  if (role !== 'super_admin' && role !== 'admin') {
+    if (role === 'user' && isUserReadablePath(ctx)) {
+      await next()
+      return
+    }
+    ctx.status = 403
+    ctx.body = { error: 'Administrator privileges are required' }
+    return
+  }
+  await next()
+}
+
 export function resolveRequestedProfile(ctx: Context): string {
   if (ctx.path === '/api/hermes/available-models' && typeof ctx.query.profile !== 'string') {
     return ''

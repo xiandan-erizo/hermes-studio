@@ -422,6 +422,27 @@ async function gatewayAutoRestartAllowed(): Promise<boolean> {
   return normalizeGatewayAutoStartConfig((await readAppConfig()).gatewayAutoStart).enabled !== false
 }
 
+const CONFIG_SECRET_KEY_PATTERN = /api_key|apikey|secret|token|password|credential/i
+
+/**
+ * Plain 'user' accounts need the chat settings payload but must never see
+ * provider credentials. Recursively redact secret-looking values.
+ */
+function redactConfigSecretsForUserRole(ctx: any, value: unknown): void {
+  if (ctx.state?.user?.role !== 'user' || !value || typeof value !== 'object') return
+  if (Array.isArray(value)) {
+    for (const item of value) redactConfigSecretsForUserRole(ctx, item)
+    return
+  }
+  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof nested === 'string' && nested && CONFIG_SECRET_KEY_PATTERN.test(key)) {
+      ;(value as Record<string, unknown>)[key] = ''
+    } else if (nested && typeof nested === 'object') {
+      redactConfigSecretsForUserRole(ctx, nested)
+    }
+  }
+}
+
 export async function getConfig(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
@@ -464,6 +485,7 @@ export async function getConfig(ctx: any) {
     } else {
       ctx.body = { ...config, gatewayAutoStart, proxy, platformCredentialStatus }
     }
+    redactConfigSecretsForUserRole(ctx, ctx.body)
   } catch (err: any) {
     ctx.status = 500; ctx.body = { error: err.message }
   }

@@ -20,13 +20,15 @@ import ModelSettings from "@/components/hermes/settings/ModelSettings.vue";
 import AccountSettings from "@/components/hermes/settings/AccountSettings.vue";
 import UserManagementSettings from "@/components/hermes/settings/UserManagementSettings.vue";
 import WebhookSettings from "@/components/hermes/settings/WebhookSettings.vue";
-import { isStoredSuperAdmin } from "@/api/client";
+import InviteManagementSettings from "@/components/hermes/settings/InviteManagementSettings.vue";
+import { isStoredSuperAdmin, isStoredElevatedUser } from "@/api/client";
 import { useProfilesStore } from "@/stores/hermes/profiles";
 
 const settingsStore = useSettingsStore();
 const profilesStore = useProfilesStore();
 const { t } = useI18n();
 const canManageUsers = isStoredSuperAdmin();
+const canManageInvites = isStoredElevatedUser();
 const route = useRoute();
 const router = useRouter();
 const activeTab = ref("account");
@@ -35,6 +37,7 @@ const validTabs = computed(() => new Set([
   "account",
   ...(canManageUsers ? ["users"] : []),
   ...(canManageUsers ? ["webhooks"] : []),
+  ...(canManageInvites ? ["invitations"] : []),
   "display",
   "proxy",
   "agent",
@@ -107,6 +110,9 @@ onMounted(() => {
           </NTabPane>
           <NTabPane v-if="canManageUsers" name="webhooks" :tab="t('settings.tabs.webhooks')">
             <WebhookSettings />
+          </NTabPane>
+          <NTabPane v-if="canManageInvites" name="invitations" :tab="t('settings.tabs.invitations')">
+            <InviteManagementSettings />
           </NTabPane>
           <NTabPane name="display" :tab="t('settings.tabs.display')">
             <DisplaySettings />

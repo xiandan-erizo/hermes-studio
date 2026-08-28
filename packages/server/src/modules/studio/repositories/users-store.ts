@@ -2,7 +2,7 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import { getDb } from '../infrastructure/database'
 import { USER_PROFILES_TABLE, USER_THEMES_TABLE, USERS_TABLE } from '../infrastructure/database/schemas'
 
-export type UserRole = 'super_admin' | 'admin'
+export type UserRole = 'super_admin' | 'admin' | 'user'
 export type UserStatus = 'active' | 'disabled'
 export type UserId = number | string
 
@@ -269,6 +269,40 @@ export function deleteUser(userId: UserId): boolean {
     const result = db.prepare(`DELETE FROM ${USERS_TABLE} WHERE id = ?`).run(id)
     db.exec('COMMIT')
     return result.changes > 0
+  } catch (err) {
+    db.exec('ROLLBACK')
+    throw err
+  }
+}
+
+/**
+ * Append a single profile binding without wiping existing ones.
+ * Used when a user joins a profile through an invitation link.
+ */
+export function addUserProfileBinding(userId: UserId, profileName: string, makeDefault = false): boolean {
+  const db = getDb()
+  if (!db) return false
+  const id = normalizeUserId(userId)
+  const profile = profileName.trim()
+  if (!id || !profile) return false
+
+  const existing = userCanAccessProfile(id, profile)
+  const now = Date.now()
+  if (existing && !makeDefault) return true
+
+  db.exec('BEGIN')
+  try {
+    if (!existing) {
+      db.prepare(
+        `INSERT INTO ${USER_PROFILES_TABLE} (user_id, profile_name, is_default, created_at) VALUES (?, ?, ?, ?)`
+      ).run(id, profile, makeDefault ? 1 : 0, now)
+    }
+    if (makeDefault) {
+      db.prepare(`UPDATE ${USER_PROFILES_TABLE} SET is_default = 0 WHERE user_id = ?`).run(id)
+      db.prepare(`UPDATE ${USER_PROFILES_TABLE} SET is_default = 1 WHERE user_id = ? AND profile_name = ?`).run(id, profile)
+    }
+    db.exec('COMMIT')
+    return true
   } catch (err) {
     db.exec('ROLLBACK')
     throw err

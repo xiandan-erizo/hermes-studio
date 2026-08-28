@@ -12,6 +12,7 @@ function createProxyConfig(): ProxyOptions {
   return {
     target: BACKEND,
     changeOrigin: true,
+    xfwd: true,
     ws: true,
     configure: (proxy) => {
       proxy.on('proxyReq', (proxyReq) => {
@@ -76,6 +77,7 @@ export default defineConfig({
   server: {
     port: FRONTEND_PORT,
     strictPort: true,
+    allowedHosts: ['hermes.airs-dev.ekuaibao.net'],
     proxy: {
       '/api': createProxyConfig(),
       '/v1': createProxyConfig(),

@@ -23,6 +23,7 @@ import {
 import { uploadRoutes } from '../modules/studio/routes/upload'
 import { appUploadRoutes } from '../modules/studio/routes/app-upload'
 import { authPublicRoutes, authProtectedRoutes } from '../modules/studio/routes/auth'
+import { requireElevatedApi } from '../modules/studio/public/auth'
 import { mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
 
 import { sessionRoutes } from '../modules/studio/routes/sessions'
@@ -88,18 +89,39 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   authMiddleware.forEach((middleware) => app.use(middleware))
 
   // --- Protected routes (auth required) ---
+  // Chat and profile-scoped routes: available to every authenticated user
+  // (super_admin, admin, and plain 'user' accounts invited via profile links).
   app.use(authProtectedRoutes.routes())
+  app.use(uploadRoutes.routes())
+  app.use(appUploadRoutes.routes())
+  app.use(themeRoutes.routes())
+  app.use(sessionRoutes.routes())
+  app.use(chatRunRoutes.routes())
+  app.use(chatWebhookRoutes.routes())
+  app.use(groupChatRoutes.routes())
+  app.use(fileRoutes.routes())
+  app.use(downloadRoutes.routes())
+  app.use(jobRoutes.routes())
+  app.use(cronHistoryRoutes.routes())
+  app.use(kanbanRoutes.routes())
+  app.use(workflowRoutes.routes())
+  app.use(ttsProtectedRoutes.routes())
+  app.use(sttProtectedRoutes.routes())
+  app.use(mediaRoutes.routes())
+  app.use(journeyRoutes.routes())
+  app.use(petdexRoutes.routes())
+  app.use(petRoutes.routes())
+
+  // --- Management routes (admin and super_admin only) ---
+  // From here on, plain 'user' accounts receive 403 on /api and /v1 paths.
+  app.use(requireElevatedApi)
   app.use(deviceRoutes.routes())
   app.use(mcuDeviceRoutes.routes())
   app.use(appConnectionRoutes.routes())
-  app.use(uploadRoutes.routes())
-  app.use(appUploadRoutes.routes())
   app.use(updateRoutes.routes())           // Must be before proxy (proxy catch-all matches everything)
   app.use(codingAgentRoutes.routes())
-  app.use(themeRoutes.routes())
   app.use(appRelayRoutes.routes())
   app.use(socialMessageRoutes.routes())
-  app.use(sessionRoutes.routes())
   app.use(profileRoutes.routes())
   app.use(skillRoutes.routes())
   app.use(skillBundleRoutes.routes())
@@ -116,24 +138,9 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(anthropicAuthRoutes.routes())
   app.use(minimaxAuthRoutes.routes())
   app.use(weixinRoutes.routes())
-  app.use(chatRunRoutes.routes())
-  app.use(chatWebhookRoutes.routes())
-  app.use(groupChatRoutes.routes())
-  app.use(fileRoutes.routes())
-  app.use(downloadRoutes.routes())
-  app.use(jobRoutes.routes())
-  app.use(cronHistoryRoutes.routes())
-  app.use(kanbanRoutes.routes())
-  app.use(workflowRoutes.routes())
-  app.use(ttsProtectedRoutes.routes())
-  app.use(sttProtectedRoutes.routes())
   app.use(mcuFirmwareRoutes.routes())
-  app.use(mediaRoutes.routes())
   app.use(performanceMonitorRoutes.routes())
-  app.use(journeyRoutes.routes())
   app.use(mcpRoutes.routes())                   // MCP management
   app.use(runtimeVersionRoutes.routes())         // Runtime and version management
   app.use(writeGateRoutes.routes())              // Hermes Agent write approval review
-  app.use(petdexRoutes.routes())
-  app.use(petRoutes.routes())
 }

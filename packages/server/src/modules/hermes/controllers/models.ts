@@ -568,9 +568,28 @@ export async function getAvailableModelGroupsForProfile(profile: string): Promis
   return applyModelVisibility(result.groups, modelVisibility)
 }
 
+/**
+ * Plain 'user' accounts may list models for chat, but must never receive
+ * provider API keys. Blank api_key fields on every group in the response.
+ */
+function maskGroupApiKeysForUserRole(ctx: any, body: any): void {
+  if (ctx.state?.user?.role !== 'user' || !body || typeof body !== 'object') return
+  const groups: any[] = [
+    ...(Array.isArray(body.groups) ? body.groups : []),
+    ...(Array.isArray(body.allProviders) ? body.allProviders : []),
+  ]
+  for (const profileEntry of Array.isArray(body.profiles) ? body.profiles : []) {
+    if (profileEntry && Array.isArray(profileEntry.groups)) groups.push(...profileEntry.groups)
+  }
+  for (const group of groups) {
+    if (group && typeof group === 'object' && 'api_key' in group) group.api_key = ''
+  }
+}
+
 export async function getAvailable(ctx: any) {
   try {
     const requestedProfile = requestedProfileName(ctx)
+    const redactForUserRole = () => maskGroupApiKeysForUserRole(ctx, ctx.body)
     if (!requestedProfile) {
       const appConfig = await readAppConfig()
       const modelAliases = normalizeAliases(appConfig.modelAliases)
@@ -615,6 +634,7 @@ export async function getAvailable(ctx: any) {
           groups: applyModelVisibility(applyModelAliases(result.groups, modelAliases), modelVisibility),
         })),
       }
+      redactForUserRole()
       return
     }
 
@@ -648,6 +668,7 @@ export async function getAvailable(ctx: any) {
         groups: visibleProfileGroups,
       }],
     }
+    redactForUserRole()
     return
 
     const config = await readConfigYaml()

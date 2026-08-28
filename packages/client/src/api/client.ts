@@ -45,11 +45,21 @@ function clearAuthSessionState() {
   localStorage.removeItem(ACTIVE_PROFILE_STORAGE_KEY)
 }
 
+/**
+ * Public pages (login, invite links, shared chats) tolerate background 401s
+ * caused by stale tokens without bouncing the visitor to the login page.
+ */
+function isPublicRoute(): boolean {
+  const route = router.currentRoute?.value
+  if (!route) return false
+  return route.name === 'login' || route.name === 'invite.join' || route.meta?.public === true
+}
+
 export function hasApiKey(): boolean {
   return !!getApiKey()
 }
 
-export type StoredUserRole = 'super_admin' | 'admin'
+export type StoredUserRole = 'super_admin' | 'admin' | 'user'
 
 export function getStoredUserRole(): StoredUserRole | null {
   const token = getApiKey()
@@ -59,7 +69,8 @@ export function getStoredUserRole(): StoredUserRole | null {
     const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
     const data = JSON.parse(atob(padded)) as { role?: unknown }
-    return data.role === 'super_admin' || data.role === 'admin' ? data.role : null
+    if (data.role === 'super_admin' || data.role === 'admin' || data.role === 'user') return data.role
+    return null
   } catch {
     return null
   }
@@ -67,6 +78,11 @@ export function getStoredUserRole(): StoredUserRole | null {
 
 export function isStoredSuperAdmin(): boolean {
   return getStoredUserRole() === 'super_admin'
+}
+
+export function isStoredElevatedUser(): boolean {
+  const role = getStoredUserRole()
+  return role === 'super_admin' || role === 'admin'
 }
 
 export function getStoredUsername(): string | null {
@@ -216,7 +232,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
   if (res.status === 401 && isLocalBff) {
     clearAuthSessionState()
     emitAuthNotice('expired')
-    if (router.currentRoute.value.name !== 'login') {
+    if (!isPublicRoute()) {
       router.replace({ name: 'login' })
     }
     throw new Error('Unauthorized')
@@ -228,7 +244,7 @@ export async function request<T>(path: string, options: RequestInit = {}): Promi
       if (text.includes('User is disabled or does not exist')) {
         clearAuthSessionState()
         emitAuthNotice('expired')
-        if (router.currentRoute.value.name !== 'login') {
+        if (!isPublicRoute()) {
           router.replace({ name: 'login' })
         }
       } else {

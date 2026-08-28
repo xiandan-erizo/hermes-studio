@@ -8,6 +8,7 @@ export {
   requireAdmin,
   requireSuperAdmin,
   requireUserProfile,
+  requireElevatedApi,
   type AuthenticatedUser,
 } from '../middleware/auth'
 
