@@ -434,6 +434,48 @@ export const USER_THEMES_SCHEMA: Record<string, string> = {
   updated_at: 'INTEGER NOT NULL',
 }
 
+// Multi-use profile invitation links. An invite grants the bound profile to
+// whoever activates it; accounts created through an invite get role 'user'.
+export const PROFILE_INVITES_TABLE = 'profile_invites'
+
+export const PROFILE_INVITES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  code: 'TEXT NOT NULL',
+  profile_name: 'TEXT NOT NULL',
+  created_by_user_id: 'INTEGER NOT NULL',
+  use_count: 'INTEGER NOT NULL DEFAULT 0',
+  max_uses: 'INTEGER NOT NULL DEFAULT 0',
+  expires_at: 'INTEGER',
+  revoked_at: 'INTEGER',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
+export const PROFILE_INVITES_INDEXES = {
+  idx_profile_invites_code: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_invites_code ON profile_invites(code)',
+  idx_profile_invites_profile: 'CREATE INDEX IF NOT EXISTS idx_profile_invites_profile ON profile_invites(profile_name)',
+}
+
+// Mapping between an external OIDC identity (provider subject) and a local
+// user account. Users provisioned via SSO default to role 'user'.
+export const SSO_IDENTITIES_TABLE = 'sso_identities'
+
+export const SSO_IDENTITIES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  provider: "TEXT NOT NULL DEFAULT 'oidc'",
+  subject: 'TEXT NOT NULL',
+  username: "TEXT NOT NULL DEFAULT ''",
+  email: "TEXT NOT NULL DEFAULT ''",
+  user_id: 'INTEGER NOT NULL',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
+export const SSO_IDENTITIES_INDEXES = {
+  idx_sso_identities_subject: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_sso_identities_subject ON sso_identities(provider, subject)',
+  idx_sso_identities_user: 'CREATE INDEX IF NOT EXISTS idx_sso_identities_user ON sso_identities(user_id)',
+}
+
 // ============================================================================
 // Social Messages
 // ============================================================================
@@ -1526,6 +1568,12 @@ export function initAllHermesTables(): void {
       indexes: USER_PROFILES_INDEXES,
     })
     syncTable(USER_THEMES_TABLE, USER_THEMES_SCHEMA)
+    syncTable(PROFILE_INVITES_TABLE, PROFILE_INVITES_SCHEMA, {
+      indexes: PROFILE_INVITES_INDEXES,
+    })
+    syncTable(SSO_IDENTITIES_TABLE, SSO_IDENTITIES_SCHEMA, {
+      indexes: SSO_IDENTITIES_INDEXES,
+    })
 
     // User-scoped Social Messages accounts. Only one account per user may be active.
     syncTable(SOCIAL_MESSAGE_ACCOUNTS_TABLE, SOCIAL_MESSAGE_ACCOUNTS_SCHEMA, {
