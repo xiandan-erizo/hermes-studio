@@ -590,7 +590,7 @@ useKeyboard();
   }
 }
 
-@media (max-width: $breakpoint-mobile) {
+@media (max-width: $breakpoint-mobile), (max-height: 500px) and (max-width: 1024px) {
   .app-main--card {
     margin: 0;
     border: none;

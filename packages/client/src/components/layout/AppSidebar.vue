@@ -944,7 +944,7 @@ function handleUpdateClick() {
   }
 }
 
-@media (max-width: $breakpoint-mobile) {
+@media (max-width: $breakpoint-mobile), (max-height: 500px) and (max-width: 1024px) {
   .sidebar {
     position: fixed;
     left: 10px;

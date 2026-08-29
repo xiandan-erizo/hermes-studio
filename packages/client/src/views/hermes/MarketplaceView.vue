@@ -258,7 +258,7 @@ onMounted(async () => {
 
 <template>
   <div class="marketplace-page">
-    <div class="page-header">
+    <div class="marketplace-header">
       <h1 class="page-title">{{ t('marketplace.title') }}</h1>
       <p class="page-subtitle">{{ t('marketplace.subtitle') }}</p>
     </div>
@@ -278,33 +278,33 @@ onMounted(async () => {
         size="small"
         class="search-input"
       />
-      <NButton
-        v-if="isElevated"
-        size="small"
-        :loading="refreshing"
-        :disabled="!selectedSourceId"
-        @click="handleRefresh"
-      >
-        {{ t('marketplace.refresh') }}
-      </NButton>
-      <NButton
-        v-if="isElevated"
-        size="small"
-        type="primary"
-        ghost
-        @click="showAddSource = true"
-      >
-        {{ t('marketplace.addSource') }}
-      </NButton>
-      <NButton
-        v-if="isElevated && selectedSource"
-        size="small"
-        quaternary
-        type="error"
-        @click="confirmDeleteSource"
-      >
-        {{ t('marketplace.deleteSource') }}
-      </NButton>
+      <div v-if="isElevated" class="toolbar-actions">
+        <NButton
+          size="small"
+          :loading="refreshing"
+          :disabled="!selectedSourceId"
+          @click="handleRefresh"
+        >
+          {{ t('marketplace.refresh') }}
+        </NButton>
+        <NButton
+          size="small"
+          type="primary"
+          ghost
+          @click="showAddSource = true"
+        >
+          {{ t('marketplace.addSource') }}
+        </NButton>
+        <NButton
+          v-if="selectedSource"
+          size="small"
+          ghost
+          type="error"
+          @click="confirmDeleteSource"
+        >
+          {{ t('marketplace.deleteSource') }}
+        </NButton>
+      </div>
     </div>
 
     <NAlert
@@ -461,8 +461,10 @@ onMounted(async () => {
   margin: 0 auto;
 }
 
-.page-header {
-  margin-bottom: 16px;
+.marketplace-header {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--n-border-color, #e0e0e6);
 }
 
 .page-title {
@@ -678,4 +680,114 @@ onMounted(async () => {
   color: var(--n-text-color-3, #888);
   margin: 4px 0 0;
 }
+
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 820px) and (orientation: portrait) {
+  .plugin-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* App navigation becomes a fixed hamburger on narrow/short viewports. Keep
+ * the page title clear of its 36px hit target. */
+@media (max-width: 768px), (max-height: 500px) and (max-width: 1024px) {
+  .marketplace-header {
+    padding-inline-start: 48px;
+  }
+}
+
+@media (max-width: 640px) {
+  .marketplace-page {
+    padding: 12px;
+  }
+
+  .marketplace-header {
+    margin-bottom: 10px;
+    padding-block: 0 10px;
+    padding-inline: 48px 0;
+  }
+
+  .page-title {
+    font-size: 20px;
+    line-height: 1.25;
+    margin-bottom: 4px;
+  }
+
+  .page-subtitle {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .source-select,
+  .search-input {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .toolbar-actions :deep(.n-button) {
+    width: 100%;
+    min-width: 0;
+    min-height: 44px;
+    padding-inline: 6px;
+  }
+
+  .source-select :deep(.n-base-selection),
+  .search-input :deep(.n-input) {
+    min-height: 44px;
+  }
+
+  .source-status {
+    margin-bottom: 10px;
+    line-height: 1.45;
+  }
+
+  .commit {
+    display: block;
+    margin-inline-start: 0;
+    margin-top: 2px;
+  }
+
+  .plugin-grid {
+    gap: 10px;
+  }
+
+  .plugin-card {
+    padding: 12px;
+  }
+
+  .plugin-card-head {
+    align-items: flex-start;
+  }
+
+  .plugin-title {
+    flex: 1;
+    min-width: 160px;
+  }
+}
+
 </style>
