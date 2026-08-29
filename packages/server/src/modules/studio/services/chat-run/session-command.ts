@@ -46,6 +46,8 @@ interface SessionCommandContext {
   sessionMap: Map<string, SessionState>
   bridge: AgentBridgeClient
   profile: string
+  /** authenticated Studio user (P0 ownership). */
+  user?: { id: number | string; role?: string } | null
   model?: string
   provider?: string
   model_groups?: Array<{ provider: string; models: string[] }>
@@ -718,7 +720,7 @@ export async function handleSessionCommand(
       }
       const title = command.args.slice(0, 120)
       if (!getSession(sessionId)) {
-        createSession({ id: sessionId, profile: ctx.profile, source: 'cli', model: ctx.model, title })
+        createSession({ id: sessionId, profile: ctx.profile, source: 'cli', model: ctx.model, title, owner_user_id: ctx.user?.id != null ? Number(ctx.user.id) : null })
       }
       const updated = renameSession(sessionId, title)
       emitCommand({
@@ -1166,6 +1168,7 @@ function ensureCommandSession(sessionId: string, command: ParsedSessionCommand, 
     source: 'cli',
     model: ctx.model,
     title: buildCommandSessionTitle(command),
+    owner_user_id: ctx.user?.id != null ? Number(ctx.user.id) : null,
   })
 }
 

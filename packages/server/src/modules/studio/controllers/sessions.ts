@@ -53,6 +53,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
+import { denySessionRead, denySessionOperation, canReadSession } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -130,11 +131,40 @@ function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
   return items.filter(item => allowed.has(((item as any).profile as string | null | undefined) || 'default'))
 }
 
-function denySessionAccess(ctx: any, session: any | null | undefined): boolean {
-  if (!session || canAccessProfile(ctx, session.profile)) return false
-  ctx.status = 403
-  ctx.body = { error: `Profile "${session.profile || 'default'}" is not available for this user` }
-  return true
+/**
+ * List-level ownership filter (P0): plain 'user' accounts only see sessions
+ * they own. Admins keep profile-wide visibility (read-only history review);
+ * the per-session operate gate stays enforced by denySessionAccess.
+ */
+function filterBySessionOwnership<T>(ctx: any, items: T[]): T[] {
+  const user = ctx.state?.user
+  if (!user || user.role === 'super_admin' || user.role === 'admin') return items
+  return items.filter(item => {
+    const ownerId = (item as any).owner_user_id
+    return ownerId != null && Number(ownerId) === Number(user.id)
+  })
+}
+
+/**
+ * Unified session gate (P0): profile scoping + ownership.
+ * mode 'read'    -> 404 when invisible (no existence leak)
+ * mode 'operate' -> 404 when invisible, 403 when read-only
+ * Authorization NEVER falls back to the legacy mixed-semantics user_id.
+ */
+function denySessionAccess(
+  ctx: any,
+  session: any | null | undefined,
+  mode: 'read' | 'operate' = 'read',
+): boolean {
+  if (!session) return false
+  if (!canAccessProfile(ctx, session.profile)) {
+    ctx.status = 403
+    ctx.body = { error: `Profile "${session.profile || 'default'}" is not available for this user` }
+    return true
+  }
+  return mode === 'operate'
+    ? denySessionOperation(ctx, session)
+    : denySessionRead(ctx, session)
 }
 
 function isVisibleWebUiSessionSource(source?: string | null): boolean {
@@ -427,7 +457,7 @@ export async function listConversations(ctx: any) {
     is_active: s.ended_at == null && (Date.now() / 1000 - s.last_active) <= 300,
     thread_session_count: 1,
   }))
-  ctx.body = { sessions: filterPendingDeletedConversationSummaries(filterByAllowedProfiles(ctx, summaries)) }
+  ctx.body = { sessions: filterPendingDeletedConversationSummaries(filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, summaries))) }
 }
 
 export async function getConversationMessages(ctx: any) {
@@ -479,7 +509,7 @@ export async function list(ctx: any) {
     excludeSessionIds: [...getPendingDeletedSessionIds()],
   })
   ctx.body = {
-    sessions: filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
+    sessions: filterPendingDeletedSessions(filterArchivedSessions(filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, allSessions)).filter(s =>
       isRequestedSessionSource(source, s.source) &&
       (!knownProfiles || knownProfiles.has(s.profile || 'default')),
     ))),
@@ -678,7 +708,7 @@ export async function search(ctx: any) {
   })
   const knownProfiles = profile ? null : new Set(searchableProfiles)
   ctx.body = {
-    results: filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, results).filter(s =>
+    results: filterPendingDeletedSessions(filterArchivedSessions(filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, results)).filter(s =>
       isRequestedSessionSource(source, s.source) &&
       (!knownProfiles || knownProfiles.has(s.profile || 'default')),
     ))),
@@ -769,11 +799,11 @@ function normalizeSessionWorkspaceRelativePath(
 async function resolveSessionWorkspacePath(
   ctx: any,
   relativePathValue: unknown,
-  options: { allowEmpty?: boolean } = {},
+  options: { allowEmpty?: boolean; operate?: boolean } = {},
 ): Promise<{ session: NonNullable<ReturnType<typeof localGetSession>>; relativePath: string; fullPath: string; workspace: string }> {
   const session = localGetSession(ctx.params.id)
   if (!session) throw Object.assign(new Error('Session not found'), { code: 'not_found', status: 404 })
-  if (denySessionAccess(ctx, session)) throw Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403, handled: true })
+  if (denySessionAccess(ctx, session, options.operate ? 'operate' : 'read')) throw Object.assign(new Error('Forbidden'), { code: 'forbidden', status: 403, handled: true })
   const workspace = String(session.workspace || '').trim()
   if (!workspace) throw Object.assign(new Error('Session workspace not found'), { code: 'workspace_not_found', status: 404 })
   const relativePath = normalizeSessionWorkspaceRelativePath(workspace, session.profile, relativePathValue, options)
@@ -784,8 +814,8 @@ async function resolveSessionWorkspacePath(
   return { session, relativePath, fullPath, workspace }
 }
 
-async function resolveSessionWorkspaceFile(ctx: any, relativePathValue: unknown) {
-  return resolveSessionWorkspacePath(ctx, relativePathValue)
+async function resolveSessionWorkspaceFile(ctx: any, relativePathValue: unknown, operate = false) {
+  return resolveSessionWorkspacePath(ctx, relativePathValue, { operate })
 }
 
 async function resolveSessionPreviewFile(ctx: any, pathValue: unknown) {
@@ -954,7 +984,7 @@ export async function readWorkspaceFileContent(ctx: any) {
 export async function writeWorkspaceFile(ctx: any) {
   const body = ctx.request.body as { path?: unknown; content?: unknown }
   try {
-    const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path)
+    const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path, true)
     if (isSensitivePath(relativePath)) {
       ctx.status = 403
       ctx.body = { error: 'Cannot modify sensitive file', code: 'permission_denied' }
@@ -977,7 +1007,7 @@ export async function writeWorkspaceFile(ctx: any) {
 export async function mkdirWorkspaceFile(ctx: any) {
   const body = ctx.request.body as { path?: unknown }
   try {
-    const { fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path)
+    const { fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path, true)
     await mkdir(fullPath, { recursive: true })
     ctx.body = { ok: true }
   } catch (err: any) {
@@ -988,7 +1018,7 @@ export async function mkdirWorkspaceFile(ctx: any) {
 export async function deleteWorkspaceFile(ctx: any) {
   const body = ctx.request.body as { path?: unknown; recursive?: unknown }
   try {
-    const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path)
+    const { relativePath, fullPath } = await resolveSessionWorkspaceFile(ctx, body?.path, true)
     if (isSensitivePath(relativePath)) {
       ctx.status = 403
       ctx.body = { error: 'Cannot delete sensitive file', code: 'permission_denied' }
@@ -1009,8 +1039,8 @@ export async function deleteWorkspaceFile(ctx: any) {
 export async function renameWorkspaceFile(ctx: any) {
   const body = ctx.request.body as { oldPath?: unknown; newPath?: unknown }
   try {
-    const oldTarget = await resolveSessionWorkspaceFile(ctx, body?.oldPath)
-    const newTarget = await resolveSessionWorkspaceFile(ctx, body?.newPath)
+    const oldTarget = await resolveSessionWorkspaceFile(ctx, body?.oldPath, true)
+    const newTarget = await resolveSessionWorkspaceFile(ctx, body?.newPath, true)
     if (isSensitivePath(oldTarget.relativePath) || isSensitivePath(newTarget.relativePath)) {
       ctx.status = 403
       ctx.body = { error: 'Cannot rename sensitive file', code: 'permission_denied' }
@@ -1026,7 +1056,7 @@ export async function renameWorkspaceFile(ctx: any) {
 export async function copyWorkspaceFile(ctx: any) {
   const body = ctx.request.body as { srcPath?: unknown; destPath?: unknown }
   try {
-    const srcTarget = await resolveSessionWorkspaceFile(ctx, body?.srcPath)
+    const srcTarget = await resolveSessionWorkspaceFile(ctx, body?.srcPath, true)
     const destTarget = await resolveSessionWorkspaceFile(ctx, body?.destPath)
     if (isSensitivePath(destTarget.relativePath)) {
       ctx.status = 403
@@ -1255,7 +1285,7 @@ export async function importHermesSession(ctx: any) {
 export async function remove(ctx: any) {
   const sessionId = ctx.params.id
   const existing = localGetSession(sessionId)
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   const hermesProfile = requestedProfile(ctx) || existing?.profile || getActiveProfileName()
   const codingAgentSession = isCodingAgentSession(existing)
   if (codingAgentSession) stopCodingAgentSessionRun(sessionId, { reportClosed: false })
@@ -1389,7 +1419,7 @@ export async function rename(ctx: any) {
     return
   }
   const existing = localGetSession(ctx.params.id)
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   const ok = localRenameSession(ctx.params.id, title.trim())
   if (!ok) {
     ctx.status = 500
@@ -1406,7 +1436,7 @@ export async function archive(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   if (existing.source === 'global_agent') {
     ctx.status = 400
     ctx.body = { error: 'Global agent sessions cannot be archived' }
@@ -1428,7 +1458,7 @@ export async function unarchive(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   const ok = localSetSessionArchived(ctx.params.id, false)
   if (!ok) {
     ctx.status = 500
@@ -1445,7 +1475,7 @@ export async function setPushEnabled(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
 
   const body = (ctx.request.body || {}) as { pushEnabled?: unknown; push_enabled?: unknown }
   const rawEnabled = body.pushEnabled ?? body.push_enabled
@@ -1475,9 +1505,9 @@ export async function setWorkspace(ctx: any) {
   const { updateSession, getSession, createSession } = await import('../public/sessions')
   const id = ctx.params.id
   const existing = getSession(id)
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   if (!existing) {
-    createSession({ id, profile: requestedProfile(ctx) || 'default', title: '' })
+    createSession({ id, profile: requestedProfile(ctx) || 'default', title: '', owner_user_id: ctx.state?.user?.id ?? null })
   }
   updateSession(id, { workspace: workspace || null } as any)
   ctx.body = { ok: true }
@@ -1490,7 +1520,7 @@ export async function setCategory(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
 
   const body = (ctx.request.body || {}) as { categoryId?: number | null; category_id?: number | null }
   const rawCategoryId = body.categoryId ?? body.category_id
@@ -1542,7 +1572,7 @@ export async function setModel(ctx: any) {
   const { updateSession, getSession, createSession } = await import('../public/sessions')
   const id = ctx.params.id
   const existing = getSession(id)
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
   const profile = existing?.profile || requestedProfile(ctx) || 'default'
   const cleanModel = model.trim()
   const cleanProvider = (provider || '').trim()
@@ -1552,7 +1582,7 @@ export async function setModel(ctx: any) {
     ? await ensureHermesRunWorkspace(profile, existing?.workspace)
     : undefined
   if (!existing) {
-    createSession({ id, profile, title: '', model: cleanModel, provider: cleanProvider, api_mode: cleanApiMode || '', reasoning_effort: '', workspace })
+    createSession({ id, profile, title: '', model: cleanModel, provider: cleanProvider, api_mode: cleanApiMode || '', reasoning_effort: '', workspace, owner_user_id: ctx.state?.user?.id ?? null })
   }
   const updates: Record<string, string> = { model: cleanModel, provider: cleanProvider, reasoning_effort: '' }
   if (cleanApiMode) updates.api_mode = cleanApiMode
@@ -1586,7 +1616,7 @@ export async function setReasoningEffort(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
-  if (denySessionAccess(ctx, existing)) return
+  if (denySessionAccess(ctx, existing, 'operate')) return
 
   const body = (ctx.request.body || {}) as { reasoningEffort?: unknown; reasoning_effort?: unknown }
   const rawEffort = body.reasoningEffort ?? body.reasoning_effort

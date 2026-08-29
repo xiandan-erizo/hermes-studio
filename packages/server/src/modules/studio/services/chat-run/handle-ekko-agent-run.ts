@@ -1,4 +1,5 @@
 import type { Server, Socket } from 'socket.io'
+import { canOperateSession } from '../../services/session-access'
 import { createHash, randomUUID } from 'crypto'
 import {
   chatEkkoAgentReasoningText as agentReasoningText,
@@ -34,6 +35,7 @@ import {
   updateMessageDisplayContent,
   updateSession,
   updateSessionStats,
+  claimSessionOwnership,
 } from '../../repositories/session-store'
 import type { ChatMessage } from '../context-compressor'
 import { logger } from '../../public/logging'
@@ -419,8 +421,14 @@ export async function handleEkkoAgentRun(
   state.abortController = abortController
 
   const storedSession = getSession(sessionId)
-  if (storedSession && !storedSession.user_id && authenticatedUserId) {
-    updateSession(sessionId, { user_id: authenticatedUserId })
+  // P0: operating an existing session requires full access; claim ownership
+  // only for state-less legacy sessions (access proven above by socket gate).
+  if (storedSession && authenticatedUserId && !canOperateSession(socket.data?.user, storedSession)) {
+    socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'Session is not available for this user' })
+    return
+  }
+  if (storedSession && storedSession.owner_user_id == null && storedSession.ownership_state == null && authenticatedUserId) {
+    claimSessionOwnership(sessionId, Number(authenticatedUserId), 'admin_claimed')
   }
   const modelConfig = await resolveBridgeRunModelConfig({
     profile,
@@ -491,6 +499,7 @@ export async function handleEkkoAgentRun(
       agent: 'ekko-agent',
       agent_mode: 'scoped',
       user_id: authenticatedUserId,
+      owner_user_id: authenticatedUserId != null ? Number(authenticatedUserId) : null,
       model: modelConfig.model,
       provider: modelConfig.provider,
       api_mode: apiMode || '',

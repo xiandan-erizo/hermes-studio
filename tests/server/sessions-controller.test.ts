@@ -340,7 +340,9 @@ describe('session conversations controller', () => {
     }])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { humanOnly: 'true', limit: '5' }, body: null }
+    const ctx: any = { query: { humanOnly: 'true', limit: '5' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.listConversations(ctx)
 
     expect(localListSessionsMock).toHaveBeenCalledWith(undefined, undefined, 5)
@@ -469,7 +471,7 @@ describe('session conversations controller', () => {
       const listCtx: any = {
         params: { id: 'session-with-workspace' },
         query: { path: 'workspace/project' },
-        state: { profile: { name: 'research' } },
+        state: { user: { id: 1, role: 'super_admin' }, profile: { name: 'research' } },
         body: null,
       }
 
@@ -485,7 +487,7 @@ describe('session conversations controller', () => {
       const readCtx: any = {
         params: { id: 'session-with-workspace' },
         query: { path: 'workspace/project/notes.md' },
-        state: { profile: { name: 'research' } },
+        state: { user: { id: 1, role: 'super_admin' }, profile: { name: 'research' } },
         body: null,
       }
 
@@ -514,7 +516,7 @@ describe('session conversations controller', () => {
       const ctx: any = {
         params: { id: 'session-relative-workspace' },
         query: { path: 'project/notes.md' },
-        state: { profile: { name: 'research' } },
+        state: { user: { id: 1, role: 'super_admin' }, profile: { name: 'research' } },
         body: null,
       }
 
@@ -543,7 +545,7 @@ describe('session conversations controller', () => {
       const ctx: any = {
         params: { id: 'session-profile-workspace' },
         query: { path: 'workspace/project/notes.md' },
-        state: {},
+        state: { user: { id: 1, role: 'super_admin' } },
         body: null,
       }
 
@@ -826,7 +828,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'session-context-1' }, query: {}, body: null }
+    const ctx: any = { params: { id: 'session-context-1' }, query: {}, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
     await mod.getContext(ctx)
 
@@ -851,7 +855,9 @@ describe('session conversations controller', () => {
     localGetSessionDetailMock.mockReturnValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'missing-session' }, query: {}, body: null }
+    const ctx: any = { params: { id: 'missing-session' }, query: {}, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
     await mod.getContext(ctx)
 
@@ -978,7 +984,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { source: 'global_agent' },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.list(ctx)
@@ -999,7 +1005,7 @@ describe('session conversations controller', () => {
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: {}, state: {}, body: null }
+    const ctx: any = { query: {}, state: { user: { id: 1, role: 'super_admin' } }, body: null }
     await mod.list(ctx)
 
     expect(ctx.body.sessions.map((session: any) => session.id)).toEqual(['visible-session'])
@@ -1014,7 +1020,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const defaultCtx: any = {
       query: {},
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.list(defaultCtx)
@@ -1022,7 +1028,7 @@ describe('session conversations controller', () => {
 
     const workflowCtx: any = {
       query: { source: 'workflow' },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.list(workflowCtx)
@@ -1070,7 +1076,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { profile: 'travel', source: 'global_agent' },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.count(ctx)
@@ -1127,7 +1133,7 @@ describe('session conversations controller', () => {
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { profile: 'travel' }, state: {}, body: null }
+    const ctx: any = { query: { profile: 'travel' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.listHermesSessions(ctx)
 
@@ -1166,7 +1172,7 @@ describe('session conversations controller', () => {
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { profile: 'travel' }, state: {}, body: null }
+    const ctx: any = { query: { profile: 'travel' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.listHermesSessions(ctx)
 
@@ -1213,7 +1219,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { profile: 'travel', limit: '2', include: ['cli-pinned'] },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
 
@@ -1244,7 +1250,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { profile: 'travel', source: 'cli', offset: '1', limit: '2' },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
 
@@ -1291,7 +1297,7 @@ describe('session conversations controller', () => {
     listSessionSummariesMock.mockResolvedValue([])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { profile: 'travel' }, state: {}, body: null }
+    const ctx: any = { query: { profile: 'travel' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.listHermesSessions(ctx)
 
@@ -1305,7 +1311,7 @@ describe('session conversations controller', () => {
     localSetSessionArchivedMock.mockReturnValue(true)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'session-1' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'session-1' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.archive(ctx)
 
@@ -1321,7 +1327,7 @@ describe('session conversations controller', () => {
     const ctx: any = {
       params: { id: 'session-1' },
       request: { body: { pushEnabled: true } },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
 
@@ -1341,7 +1347,7 @@ describe('session conversations controller', () => {
     const ctx: any = {
       params: { id: 'session-1' },
       request: { body: { pushEnabled: 1 } },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
 
@@ -1358,7 +1364,7 @@ describe('session conversations controller', () => {
     createSessionCategoryMock.mockReturnValue(category)
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
 
-    const listCtx: any = { body: null }
+    const listCtx: any = { body: null , state: { user: { id: 1, role: 'super_admin' } }}
     await mod.listCategories(listCtx)
     expect(listCtx.body).toEqual({ categories: [category] })
 
@@ -1394,7 +1400,7 @@ describe('session conversations controller', () => {
     const assignCtx: any = {
       params: { id: 'session-1' },
       request: { body: { categoryId: 1 } },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.setCategory(assignCtx)
@@ -1404,7 +1410,7 @@ describe('session conversations controller', () => {
     const clearCtx: any = {
       params: { id: 'session-1' },
       request: { body: { categoryId: null } },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.setCategory(clearCtx)
@@ -1416,7 +1422,7 @@ describe('session conversations controller', () => {
     getSessionMock.mockReturnValue({ id: 'global-1', profile: 'default', source: 'global_agent' })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'global-1' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'global-1' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.archive(ctx)
 
@@ -1429,7 +1435,7 @@ describe('session conversations controller', () => {
     getSessionMock.mockReturnValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'missing' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'missing' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.archive(ctx)
 
@@ -1443,7 +1449,7 @@ describe('session conversations controller', () => {
     localSetSessionArchivedMock.mockReturnValue(true)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'session-1' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'session-1' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.unarchive(ctx)
 
@@ -1455,7 +1461,7 @@ describe('session conversations controller', () => {
     getSessionMock.mockReturnValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'missing' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'missing' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.unarchive(ctx)
 
@@ -1499,7 +1505,7 @@ describe('session conversations controller', () => {
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { q: 'docker', source: 'global_agent', limit: '10' },
-      state: {},
+      state: { user: { id: 1, role: 'super_admin' } },
       body: null,
     }
     await mod.search(ctx)
@@ -1519,7 +1525,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { humanOnly: 'false' }, body: null }
+    const ctx: any = { query: { humanOnly: 'false' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await expect(mod.listConversations(ctx)).rejects.toThrow('db unavailable')
   })
 
@@ -1533,7 +1541,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'true' }, body: null }
+    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'true' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getConversationMessages(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('root')
@@ -1552,7 +1562,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'false' }, body: null }
+    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'false' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getConversationMessages(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('root')
@@ -1568,7 +1580,9 @@ describe('session conversations controller', () => {
     localGetSessionDetailMock.mockReturnValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'false' }, body: null }
+    const ctx: any = { params: { id: 'root' }, query: { humanOnly: 'false' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getConversationMessages(ctx)
 
     expect(ctx.status).toBe(404)
@@ -1592,7 +1606,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'cli-1' }, body: null }
+    const ctx: any = { params: { id: 'cli-1' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getHermesSession(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('cli-1')
@@ -1617,7 +1633,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'hermes-1' }, body: null }
+    const ctx: any = { params: { id: 'hermes-1' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getHermesSession(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('hermes-1')
@@ -1636,7 +1654,9 @@ describe('session conversations controller', () => {
     getSessionDetailFromDbMock.mockResolvedValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'missing-session' }, body: null }
+    const ctx: any = { params: { id: 'missing-session' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getHermesSession(ctx)
 
     expect(getSessionDetailFromDbMock).not.toHaveBeenCalled()
@@ -1656,7 +1676,9 @@ describe('session conversations controller', () => {
     }])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: {}, body: null }
+    const ctx: any = { query: {}, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.listHermesSessions(ctx)
 
     expect(listSessionSummariesMock).not.toHaveBeenCalled()
@@ -1674,7 +1696,9 @@ describe('session conversations controller', () => {
     }])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { limit: '20' }, body: null }
+    const ctx: any = { query: { limit: '20' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.listHermesSessionGroups(ctx)
 
     expect(listSessionSummaryGroupsMock).not.toHaveBeenCalled()
@@ -1698,7 +1722,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'travel-session' }, query: { profile: 'travel' }, body: null }
+    const ctx: any = { params: { id: 'travel-session' }, query: { profile: 'travel' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getHermesSession(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('travel-session')
@@ -1724,7 +1750,9 @@ describe('session conversations controller', () => {
     getSessionMock.mockResolvedValue(null)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'api-1' }, body: null }
+    const ctx: any = { params: { id: 'api-1' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.getHermesSession(ctx)
 
     expect(localGetSessionDetailMock).toHaveBeenCalledWith('api-1')
@@ -1781,7 +1809,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { days: '2' }, body: null }
+    const ctx: any = { query: { days: '2' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.usageStats(ctx)
 
     expect(getLocalUsageStatsMock).toHaveBeenCalledWith('default', 2)
@@ -1882,7 +1912,9 @@ describe('session conversations controller', () => {
     })
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { query: { days: '2' }, body: null }
+    const ctx: any = { query: { days: '2' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.usageStats(ctx)
 
     expect(ctx.body.model_usage).toEqual([
@@ -1898,6 +1930,7 @@ describe('session conversations controller', () => {
       params: { id: 'session-1' },
       request: { body: { model: 'grok-4', provider: 'xai' } },
       body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
     }
     await mod.setModel(ctx)
 
@@ -1935,6 +1968,7 @@ describe('session conversations controller', () => {
       params: { id: 'session-1' },
       request: { body: { model: 'claude-sonnet-4-6', provider: 'claude-oauth' } },
       body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
     }
     await mod.setModel(ctx)
 
@@ -1972,6 +2006,7 @@ describe('session conversations controller', () => {
       params: { id: 'codex-session' },
       request: { body: { model: 'gpt-5.5', provider: 'openai-codex', apiMode: 'chat_completions' } },
       body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
     }
     await mod.setModel(ctx)
 
@@ -1995,6 +2030,7 @@ describe('session conversations controller', () => {
       params: { id: 'session-reasoning' },
       request: { body: { reasoningEffort: 'high' } },
       body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
     }
     await mod.setReasoningEffort(ctx)
 
@@ -2014,7 +2050,9 @@ describe('session conversations controller', () => {
     deleteHermesSessionForProfileMock.mockResolvedValue(true)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'history-only' }, body: null }
+    const ctx: any = { params: { id: 'history-only' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.remove(ctx)
 
     expect(getExactSessionDetailFromDbWithProfileMock).toHaveBeenCalledWith('history-only', 'travel')
@@ -2036,7 +2074,9 @@ describe('session conversations controller', () => {
     localDeleteSessionMock.mockReturnValue(true)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'codex-session' }, body: null }
+    const ctx: any = { params: { id: 'codex-session' }, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
     await mod.remove(ctx)
 
     expect(codingAgentRunManagerMock.stop).toHaveBeenCalledWith('codex-session', { reportClosed: false })
@@ -2102,6 +2142,7 @@ describe('session conversations controller', () => {
         },
       },
       body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
     }
     await mod.batchRemove(ctx)
 
@@ -2149,7 +2190,7 @@ describe('session conversations controller', () => {
     getSessionDetailFromDbWithProfileMock.mockResolvedValue(hermesDetail)
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-    const ctx: any = { params: { id: 'cli-1' }, query: { profile: 'travel' }, state: {}, body: null }
+    const ctx: any = { params: { id: 'cli-1' }, query: { profile: 'travel' }, state: { user: { id: 1, role: 'super_admin' } }, body: null }
 
     await mod.importHermesSession(ctx)
 
@@ -2193,7 +2234,9 @@ describe('session conversations controller', () => {
 
       const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
       const setMock = vi.fn()
-      const ctx: any = { params: { id: 'abc-123' }, query: {}, set: setMock, body: null }
+      const ctx: any = { params: { id: 'abc-123' }, query: {}, set: setMock, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
       await mod.exportSession(ctx)
 
@@ -2217,7 +2260,9 @@ describe('session conversations controller', () => {
 
       const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
       const setMock = vi.fn()
-      const ctx: any = { params: { id: 'txt-123' }, query: { mode: 'full', ext: 'txt' }, set: setMock, body: null }
+      const ctx: any = { params: { id: 'txt-123' }, query: { mode: 'full', ext: 'txt' }, set: setMock, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
       await mod.exportSession(ctx)
 
@@ -2248,7 +2293,8 @@ describe('session conversations controller', () => {
         query: { mode: 'compressed', ext: 'json' },
         set: vi.fn(),
         body: null,
-      }
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
       await mod.exportSession(ctx)
 
@@ -2265,7 +2311,9 @@ describe('session conversations controller', () => {
       getSessionMock.mockResolvedValue(null)
 
       const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
-      const ctx: any = { params: { id: 'not-found' }, query: {}, set: vi.fn(), body: null }
+      const ctx: any = { params: { id: 'not-found' }, query: {}, set: vi.fn(), body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
       await mod.exportSession(ctx)
 
@@ -2279,7 +2327,9 @@ describe('session conversations controller', () => {
 
       const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
       const setMock = vi.fn()
-      const ctx: any = { params: { id: 'cli-123' }, query: {}, set: setMock, body: null }
+      const ctx: any = { params: { id: 'cli-123' }, query: {}, set: setMock, body: null,
+      state: { user: { id: 1, role: 'super_admin' } },
+    }
 
       await mod.exportSession(ctx)
 

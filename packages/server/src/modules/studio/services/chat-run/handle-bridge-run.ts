@@ -4,8 +4,9 @@
  */
 
 import type { Server, Socket } from 'socket.io'
+import { canOperateSession } from '../../services/session-access'
 import { getSystemPrompt } from '../../public/runs/prompt'
-import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats } from '../../repositories/session-store'
+import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats, claimSessionOwnership } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
 import { normalizeTokenUsage, recordSessionUsage } from '../usage/usage-recorder'
 import type {
@@ -464,8 +465,16 @@ export async function handleBridgeRun(
     || instructions
     || getSystemPrompt(undefined, { source: data.session_source || data.source })
   const sessionRow = getSession(session_id)
-  if (sessionRow && !sessionRow.user_id && socketUser?.id != null) {
-    updateSession(session_id, { user_id: String(socketUser.id) })
+  // P0: operating an existing session requires full access (owner or
+  // super_admin). Legacy mixed-semantics user_id is never consulted.
+  if (sessionRow && socketUser && !canOperateSession(socketUser, sessionRow)) {
+    socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'Session is not available for this user' })
+    return
+  }
+  // Claim ownership for state-less legacy sessions started by an authorized
+  // user (the access check above already proved full access).
+  if (sessionRow && sessionRow.owner_user_id == null && sessionRow.ownership_state == null && socketUser?.id != null) {
+    claimSessionOwnership(session_id, Number(socketUser.id), 'admin_claimed')
   }
   const reasoningEffort = callbackContext?.reasoningEffort ?? data.reasoning_effort ?? sessionRow?.reasoning_effort
   const requestedWorkspace = callbackContext
@@ -563,7 +572,7 @@ export async function handleBridgeRun(
     if (!getSession(session_id)) {
       const previewText = extractTextForPreview(displayInput || input)
       const preview = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
-      createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
+      createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, owner_user_id: socketUser?.id != null ? Number(socketUser.id) : null, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
     }
     messageId = addMessage({
       session_id,
@@ -585,7 +594,7 @@ export async function handleBridgeRun(
   } else if (!getSession(session_id)) {
     const previewText = displayInput === null ? extractTextForPreview(input) : extractTextForPreview(displayInput || input)
     const preview = previewText.replace(/[\r\n]/g, ' ').substring(0, 100)
-    createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
+    createSession({ id: session_id, profile, source: runSource, user_id: socketUser?.id, owner_user_id: socketUser?.id != null ? Number(socketUser.id) : null, model: resolvedModel, provider: resolvedProvider, reasoning_effort: reasoningEffort || '', title: preview, workspace, category_id: data.category_id, push_enabled: data.push_enabled })
   }
 
   socket.join(`session:${session_id}`)

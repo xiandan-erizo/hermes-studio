@@ -223,9 +223,9 @@ describe('ChatRunSocket global pending interactions', () => {
     ;(socket.data as any).user = { id: 7, username: 'limited-user', role: 'user' }
     userCanAccessProfileMock.mockImplementation((_user: unknown, profile: string) => profile === 'default')
     getSessionMock.mockImplementation((sessionId?: string) => sessionId === 'research-session'
-      ? { id: sessionId, profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai' }
+      ? { id: sessionId, profile: 'research', source: 'cli', model: 'gpt-test', provider: 'openai', owner_user_id: null, ownership_state: 'unresolved' }
       : sessionId
-        ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
+        ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai', owner_user_id: 7, ownership_state: 'owned' }
         : undefined)
     bridgeMock.approvalRespond.mockClear()
     bridgeMock.clarifyRespond.mockClear()

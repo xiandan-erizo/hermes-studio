@@ -134,13 +134,13 @@ const router = createRouter({
       path: '/hermes/skills',
       name: 'hermes.skills',
       component: () => import('@/views/hermes/SkillsView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/plugins',
       name: 'hermes.plugins',
       component: () => import('@/views/hermes/PluginsView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/petdex',
@@ -151,13 +151,13 @@ const router = createRouter({
       path: '/hermes/memory',
       name: 'hermes.memory',
       component: () => import('@/views/hermes/MemoryView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/config/settings',
       name: 'hermes.configSettings',
       component: () => import('@/views/hermes/HermesSettingsView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
     {
       path: '/hermes/settings',
@@ -173,7 +173,7 @@ const router = createRouter({
       path: '/hermes/channels',
       name: 'hermes.channels',
       component: () => import('@/views/hermes/ChannelsView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
     {
       path: '/social-messages',
@@ -256,7 +256,7 @@ const router = createRouter({
       path: '/hermes/mcp',
       name: 'hermes.mcp',
       component: () => import('@/views/hermes/McpManagerView.vue'),
-      meta: { requiresElevated: true, hermesConfig: true },
+      meta: { hermesConfig: true },
     },
   ],
 })
@@ -312,7 +312,9 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (to.meta.requiresElevated && !isStoredElevatedUser()) {
+  // Plain 'user' accounts stay out of management pages. hermesConfig pages
+  // are the dedicated Hermes-only sidebar (admins only by design).
+  if ((to.meta.requiresElevated || to.meta.hermesConfig) && !isStoredElevatedUser()) {
     next({ name: 'hermes.chat' })
     return
   }

@@ -62,6 +62,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
   addMessage: addMessageMock,
   updateSession: updateSessionMock,
   updateSessionStats: updateSessionStatsMock,
+  claimSessionOwnership: vi.fn(() => true),
 }))
 
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({

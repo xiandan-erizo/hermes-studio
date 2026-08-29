@@ -46,6 +46,15 @@ export interface HermesSessionRow {
   workspace: string | null
   category_id: number | null
   history_revision: number
+  // ---- session ownership (P0) ----
+  owner_user_id: number | null
+  external_actor_source: string | null
+  external_actor_id: string | null
+  origin_source: string | null
+  origin_session_id: string | null
+  ownership_state: string | null
+  ownership_resolution: string | null
+  ownership_migration_version: number | null
   parent_title?: string | null
   parent_last_message?: string | null
   parent_last_message_role?: string | null
@@ -148,6 +157,14 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
     history_revision: Number(row.history_revision || 0),
+    owner_user_id: row.owner_user_id != null ? Number(row.owner_user_id) : null,
+    external_actor_source: row.external_actor_source != null ? String(row.external_actor_source) : null,
+    external_actor_id: row.external_actor_id != null ? String(row.external_actor_id) : null,
+    origin_source: row.origin_source != null ? String(row.origin_source) : null,
+    origin_session_id: row.origin_session_id != null ? String(row.origin_session_id) : null,
+    ownership_state: row.ownership_state != null ? String(row.ownership_state) : null,
+    ownership_resolution: row.ownership_resolution != null ? String(row.ownership_resolution) : null,
+    ownership_migration_version: row.ownership_migration_version != null ? Number(row.ownership_migration_version) : null,
     parent_title: row.parent_title != null ? String(row.parent_title) : null,
     parent_last_message: row.parent_last_message != null ? String(row.parent_last_message) : null,
     parent_last_message_role: row.parent_last_message_role != null ? String(row.parent_last_message_role) : null,
@@ -187,6 +204,8 @@ export function createSession(data: {
   agent_session_id?: string
   agent_native_session_id?: string
   user_id?: string | number | null
+  /** Studio authorization subject. New sessions MUST carry this. */
+  owner_user_id?: number | null
   model?: string
   provider?: string
   api_mode?: string
@@ -215,12 +234,18 @@ export function createSession(data: {
       cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
+      owner_user_id: data.owner_user_id ?? null,
+      external_actor_source: null, external_actor_id: null,
+      origin_source: null, origin_session_id: null,
+      ownership_state: data.owner_user_id != null ? 'owned' : null,
+      ownership_resolution: data.owner_user_id != null ? 'created' : null,
+      ownership_migration_version: null,
     }
   }
   const db = getDb()!
   db.prepare(
-    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, push_enabled, owner_user_id, ownership_state, ownership_resolution)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     data.id,
     data.profile || 'default',
@@ -241,6 +266,9 @@ export function createSession(data: {
     data.workspace || null,
     data.category_id ?? null,
     data.push_enabled ? 1 : 0,
+    data.owner_user_id ?? null,
+    data.owner_user_id != null ? 'owned' : null,
+    data.owner_user_id != null ? 'created' : null,
   )
   return getSession(data.id)!
 }
@@ -255,6 +283,8 @@ export function createBranchedSession(data: {
   agent_session_id?: string
   agent_native_session_id?: string
   user_id?: string | number | null
+  /** Studio authorization subject (the forking user). */
+  owner_user_id?: number | null
   model?: string
   provider?: string
   api_mode?: string
@@ -297,8 +327,8 @@ export function createBranchedSession(data: {
     ).run(data.ended_at, 'branched', data.parent_session_id)
 
     db.prepare(
-      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count, owner_user_id, ownership_state, ownership_resolution, origin_session_id, origin_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       data.id,
       data.profile || 'default',
@@ -319,6 +349,11 @@ export function createBranchedSession(data: {
       data.workspace || null,
       data.category_id ?? null,
       data.messages.length,
+      data.owner_user_id ?? null,
+      data.owner_user_id != null ? 'owned' : null,
+      data.owner_user_id != null ? 'created' : null,
+      data.parent_session_id,
+      'fork',
     )
 
     let forkPointMessageId: string | null = null
@@ -477,6 +512,20 @@ export function renameSession(id: string, title: string): boolean {
   if (!isSqliteAvailable()) return false
   const db = getDb()!
   const result = db.prepare(`UPDATE ${SESSIONS_TABLE} SET title = ? WHERE id = ?`).run(title, id)
+  return result.changes > 0
+}
+
+/**
+ * Claim session ownership for an authorized user (P0). Only succeeds on
+ * sessions that have not been classified yet (ownership_state IS NULL and no
+ * owner), so migrated/external/unresolved rows are never silently claimed.
+ */
+export function claimSessionOwnership(id: string, userId: number, resolution: 'admin_claimed' | 'imported' = 'admin_claimed'): boolean {
+  if (!isSqliteAvailable()) return false
+  const db = getDb()!
+  const result = db.prepare(
+    `UPDATE ${SESSIONS_TABLE} SET owner_user_id = ?, ownership_state = 'owned', ownership_resolution = ? WHERE id = ? AND owner_user_id IS NULL AND ownership_state IS NULL`,
+  ).run(userId, resolution, id)
   return result.changes > 0
 }
 

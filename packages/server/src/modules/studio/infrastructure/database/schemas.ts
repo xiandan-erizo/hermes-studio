@@ -89,10 +89,33 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
+  // ---- session ownership (P0) ----
+  // Studio 授权主体：谁能继续/修改/删除这条本地会话。与旧 user_id（语义混合）解耦。
+  owner_user_id: 'INTEGER',
+  external_actor_source: 'TEXT',
+  external_actor_id: 'TEXT',
+  origin_source: 'TEXT',
+  origin_session_id: 'TEXT',
+  // 'owned' | 'external' | 'unresolved' | NULL(=尚未迁移)
+  ownership_state: 'TEXT',
+  // 'created' | 'migration_verified' | 'imported' | 'admin_claimed'
+  ownership_resolution: 'TEXT',
+  ownership_migration_version: 'INTEGER',
 }
 
 export const SESSIONS_INDEXES = {
   idx_sessions_category_id: 'CREATE INDEX IF NOT EXISTS idx_sessions_category_id ON sessions(category_id)',
+  idx_sessions_owner_user: 'CREATE INDEX IF NOT EXISTS idx_sessions_owner_user ON sessions(owner_user_id)',
+  idx_sessions_ownership_state: 'CREATE INDEX IF NOT EXISTS idx_sessions_ownership_state ON sessions(ownership_state)',
+}
+
+// 版本化数据迁移台账（与 syncTable 的 schema 同步不同，这里记录数据迁移）。
+export const SCHEMA_MIGRATIONS_TABLE = 'schema_migrations'
+
+export const SCHEMA_MIGRATIONS_SCHEMA: Record<string, string> = {
+  migration_id: 'TEXT PRIMARY KEY',
+  applied_at: 'INTEGER NOT NULL',
+  result_summary: 'TEXT NOT NULL DEFAULT \'\'',
 }
 
 export const MESSAGES_TABLE = 'messages'
@@ -1088,6 +1111,7 @@ export const GC_SESSION_PROFILES_SCHEMA: Record<string, string> = {
 // ============================================================================
 
 import { getDb, getStoragePath } from './index'
+import { migrateSessionOwnership } from '../../services/session-ownership'
 
 function quoteIdentifier(identifier: string): string {
   return `"${identifier.replace(/"/g, '""')}"`
@@ -1547,6 +1571,10 @@ export function initAllHermesTables(): void {
     syncTable(SESSIONS_TABLE, SESSIONS_SCHEMA, {
       indexes: SESSIONS_INDEXES,
     })
+    // Data-migration ledger + versioned session ownership backfill (dry-run by
+    // default; the migration itself is guarded and idempotent).
+    syncTable(SCHEMA_MIGRATIONS_TABLE, SCHEMA_MIGRATIONS_SCHEMA)
+    migrateSessionOwnership(db)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)
     syncTable(MESSAGES_TABLE, MESSAGES_SCHEMA)

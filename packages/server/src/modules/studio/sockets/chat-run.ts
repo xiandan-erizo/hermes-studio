@@ -8,6 +8,7 @@
  */
 
 import type { Server, Socket } from 'socket.io'
+import { canOperateSession } from '../services/session-access'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
@@ -338,6 +339,11 @@ export class ChatRunSocket {
       if (socketUser && !this.canAccessProfile(socketUser, sessionProfile)) {
         throw new Error(`Profile "${sessionProfile}" is not available for this user`)
       }
+      // P0: socket run/abort/resume require FULL session access (owner or
+      // super_admin). Legacy user_id is never consulted.
+      if (socketUser && !canOperateSession(socketUser, session)) {
+        throw new Error('Session is not available for this user')
+      }
       return sessionProfile
     }
 
@@ -406,6 +412,7 @@ export class ChatRunSocket {
               sessionMap: this.sessionMap,
               bridge: this.bridge,
               profile: runProfile,
+              user: socketUser ?? null,
               model: data.model,
               provider: data.provider,
               model_groups: data.model_groups,
