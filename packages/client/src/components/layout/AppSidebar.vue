@@ -106,6 +106,29 @@ function handleUpdateClick() {
   >
     <nav class="sidebar-nav">
       <RouteLinkItem
+        v-if="hasRoute('hermes.marketplace')"
+        class="nav-item"
+        :to="{ name: 'hermes.marketplace' }"
+        :active="selectedKey === 'hermes.marketplace'"
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="7" rx="1" />
+          <rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" />
+          <rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+        <span>{{ t("sidebar.marketplace") }}</span>
+      </RouteLinkItem>
+      <RouteLinkItem
         v-if="isElevated"
         class="nav-item"
         :to="{ name: 'hermes.logs' }"

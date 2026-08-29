@@ -128,6 +128,22 @@ export const EXTERNAL_IDENTITIES_INDEXES = {
   idx_external_identities_user: 'CREATE INDEX IF NOT EXISTS idx_external_identities_user ON external_identities(user_id)',
 }
 
+// 插件中心（marketplace）git 源注册表。插件目录数据在各自 git 缓存里，
+// 这里只存源身份与最近一次同步状态。
+export const MARKETPLACE_SOURCES_TABLE = 'marketplace_sources'
+
+export const MARKETPLACE_SOURCES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  name: 'TEXT NOT NULL',
+  url: 'TEXT NOT NULL UNIQUE',
+  enabled: 'INTEGER NOT NULL DEFAULT 1',
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+  last_synced_at: 'INTEGER',
+  last_commit: 'TEXT',
+  last_error: 'TEXT',
+}
+
 // 版本化数据迁移台账（与 syncTable 的 schema 同步不同，这里记录数据迁移）。
 export const SCHEMA_MIGRATIONS_TABLE = 'schema_migrations'
 
@@ -1596,6 +1612,7 @@ export function initAllHermesTables(): void {
     syncTable(EXTERNAL_IDENTITIES_TABLE, EXTERNAL_IDENTITIES_SCHEMA, {
       indexes: EXTERNAL_IDENTITIES_INDEXES,
     })
+    syncTable(MARKETPLACE_SOURCES_TABLE, MARKETPLACE_SOURCES_SCHEMA)
     migrateSessionOwnership(db)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)

@@ -1,4 +1,4 @@
-export type SkillSource = 'builtin' | 'hub' | 'local' | 'external'
+export type SkillSource = 'builtin' | 'hub' | 'local' | 'external' | 'marketplace'
 
 export interface SkillUsageRow {
   skill: string

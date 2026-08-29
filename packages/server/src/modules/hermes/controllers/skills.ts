@@ -12,6 +12,7 @@ import { isPathWithin } from '../services/runtime/path'
 import { getActiveProfileName, getProfileDir } from '../services/profiles/profile'
 import { listSkillUsageEventsAfterMessageId } from '../services/history/sessions-db'
 import { isHermesAgentAvailable } from '../../studio/public/agent-status-registry'
+import { readMarketplaceLock } from '../services/marketplace/install'
 import {
   getLocalSkillUsageStats,
   getSkillUsageSyncCursor,
@@ -203,9 +204,11 @@ function getSkillSource(
   dirName: string,
   bundledManifest: Map<string, string>,
   hubNames: Set<string>,
+  marketplaceNames: Set<string> = new Set(),
 ): SkillSource {
   if (bundledManifest.has(dirName)) return 'builtin'
   if (hubNames.has(dirName)) return 'hub'
+  if (marketplaceNames.has(dirName)) return 'marketplace'
   return 'local'
 }
 
@@ -317,7 +320,7 @@ async function listVisibleDirectoryEntries(dir: string): Promise<VisibleDirector
  * or by containing subdirectories with SKILL.md (three-level pattern).
  * Skills without a parent category (flat skills) are grouped under the "misc" category.
  */
-async function scanSkillsDir(skillsDir: string, bundledManifest: Map<string, string>, hubNames: Set<string>, disabledList: string[], usageStats: Map<string, UsageStats>) {
+async function scanSkillsDir(skillsDir: string, bundledManifest: Map<string, string>, hubNames: Set<string>, disabledList: string[], usageStats: Map<string, UsageStats>, marketplaceNames: Set<string> = new Set()) {
   const rootRealPath = await realpath(skillsDir).catch(() => resolve(skillsDir))
   const dirEntries = await listVisibleDirectoryEntries(skillsDir)
 
@@ -339,7 +342,7 @@ async function scanSkillsDir(skillsDir: string, bundledManifest: Map<string, str
       flatSkills.push({
         name: entry.name,
         skillMd: hasSkillMd,
-        source: getSkillSource(entry.name, bundledManifest, hubNames),
+        source: getSkillSource(entry.name, bundledManifest, hubNames, marketplaceNames),
       })
     } else if (!!hasDesc || subDirs.length > 0) {
       // True category: has DESCRIPTION.md or subdirs, but no SKILL.md at top level
@@ -366,7 +369,7 @@ async function scanSkillsDir(skillsDir: string, bundledManifest: Map<string, str
         const entryPath = entry.path
         const skillMd = await safeReadFile(join(entryPath, 'SKILL.md'))
         if (skillMd) {
-          const source = getSkillSource(entry.name, bundledManifest, hubNames)
+          const source = getSkillSource(entry.name, bundledManifest, hubNames, marketplaceNames)
           let modified = false
           if (source === 'builtin') {
             const manifestHash = bundledManifest.get(entry.name)
@@ -431,14 +434,14 @@ async function scanSkillsDir(skillsDir: string, bundledManifest: Map<string, str
   return categories
 }
 
-async function scanSkillsDirIfExists(skillsDir: string, bundledManifest: Map<string, string>, hubNames: Set<string>, disabledList: string[], usageStats: Map<string, UsageStats>) {
+async function scanSkillsDirIfExists(skillsDir: string, bundledManifest: Map<string, string>, hubNames: Set<string>, disabledList: string[], usageStats: Map<string, UsageStats>, marketplaceNames: Set<string> = new Set()) {
   try {
     const info = await stat(skillsDir)
     if (!info.isDirectory()) return []
   } catch {
     return []
   }
-  return scanSkillsDir(skillsDir, bundledManifest, hubNames, disabledList, usageStats)
+  return scanSkillsDir(skillsDir, bundledManifest, hubNames, disabledList, usageStats, marketplaceNames)
 }
 
 function withSkillSource(categories: any[], source: SkillSource): any[] {
@@ -541,9 +544,10 @@ export async function list(ctx: any) {
     const bundledManifest = readBundledManifest(await safeReadFile(join(skillsDir, '.bundled_manifest')))
     const hubNames = readHubInstalledNames(await safeReadFile(join(skillsDir, '.hub', 'lock.json')))
     const usageStats = readUsageStats(await safeReadFile(join(skillsDir, '.usage.json')))
+    const marketplaceNames = new Set(Object.keys(await readMarketplaceLock(skillsDir)))
 
     // Scan all skills (supports both two-level and three-level directory structures)
-    let categories = await scanSkillsDirIfExists(skillsDir, bundledManifest, hubNames, disabledList, usageStats)
+    let categories = await scanSkillsDirIfExists(skillsDir, bundledManifest, hubNames, disabledList, usageStats, marketplaceNames)
     // Map resolved → raw so we can attach the user-written path (e.g. ~/...) to
     // each external skill — the SkillsView groups by this when the external
     // filter is active.
@@ -569,7 +573,7 @@ export async function list(ctx: any) {
         archived.push({
           name: entry.name,
           description: extractDescription(skillMd),
-          source: getSkillSource(entry.name, bundledManifest, hubNames),
+          source: getSkillSource(entry.name, bundledManifest, hubNames, marketplaceNames),
           patchCount: usage?.patch_count,
           useCount: usage?.use_count,
           viewCount: usage?.view_count,
@@ -1044,6 +1048,7 @@ export async function importSkill(ctx: any) {
   // Provenance for conflict detection (cannot shadow builtin/hub)
   const bundledManifest = readBundledManifest(await safeReadFile(join(skillsDir, '.bundled_manifest')))
   const hubNames = readHubInstalledNames(await safeReadFile(join(skillsDir, '.hub', 'lock.json')))
+  const marketplaceNames = new Set(Object.keys(await readMarketplaceLock(skillsDir)))
 
   // Decide between "zip" and "folder" mode
   const isSingleZip = filePartsAll.length === 1 &&
@@ -1133,9 +1138,9 @@ export async function importSkill(ctx: any) {
         ctx.body = { error: `Invalid skill name "${skillName}"` }
         return
       }
-      if (bundledManifest.has(skillName) || hubNames.has(skillName)) {
+      if (bundledManifest.has(skillName) || hubNames.has(skillName) || marketplaceNames.has(skillName)) {
         ctx.status = 409
-        ctx.body = { error: `Skill "${skillName}" conflicts with a builtin or hub-managed skill` }
+        ctx.body = { error: `Skill "${skillName}" conflicts with a builtin, hub- or marketplace-managed skill` }
         return
       }
 
@@ -1187,9 +1192,9 @@ export async function importSkill(ctx: any) {
         ctx.body = { error: `Skill folder "${skillName}" must contain a SKILL.md file at its root` }
         return
       }
-      if (bundledManifest.has(skillName) || hubNames.has(skillName)) {
+      if (bundledManifest.has(skillName) || hubNames.has(skillName) || marketplaceNames.has(skillName)) {
         ctx.status = 409
-        ctx.body = { error: `Skill "${skillName}" conflicts with a builtin or hub-managed skill` }
+        ctx.body = { error: `Skill "${skillName}" conflicts with a builtin, hub- or marketplace-managed skill` }
         return
       }
 

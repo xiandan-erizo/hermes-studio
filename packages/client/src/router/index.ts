@@ -148,6 +148,11 @@ const router = createRouter({
       component: () => import('@/views/hermes/PetdexView.vue'),
     },
     {
+      path: '/hermes/marketplace',
+      name: 'hermes.marketplace',
+      component: () => import('@/views/hermes/MarketplaceView.vue'),
+    },
+    {
       path: '/hermes/memory',
       name: 'hermes.memory',
       component: () => import('@/views/hermes/MemoryView.vue'),

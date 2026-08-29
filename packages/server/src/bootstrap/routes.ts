@@ -31,6 +31,7 @@ import { profileRoutes } from '../modules/hermes/routes/profiles'
 import { skillRoutes } from '../modules/hermes/routes/skills'
 import { skillBundleRoutes } from '../modules/hermes/routes/skill-bundles'
 import { pluginRoutes } from '../modules/hermes/routes/plugins'
+import { marketplaceRoutes, marketplaceAdminRoutes } from '../modules/hermes/routes/marketplace'
 import { memoryRoutes } from '../modules/hermes/routes/memory'
 import { modelRoutes } from '../modules/hermes/routes/models'
 import { providerRoutes } from '../modules/hermes/routes/providers'
@@ -112,6 +113,8 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(journeyRoutes.routes())
   app.use(petdexRoutes.routes())
   app.use(petRoutes.routes())
+  // Plugin marketplace (插件中心): catalog browsing + profile-scoped install
+  app.use(marketplaceRoutes.routes())
 
   // --- Management routes (admin and super_admin only) ---
   // From here on, plain 'user' accounts receive 403 on /api and /v1 paths.
@@ -128,6 +131,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(skillRoutes.routes())
   app.use(skillBundleRoutes.routes())
   app.use(pluginRoutes.routes())
+  app.use(marketplaceAdminRoutes.routes())   // Marketplace source CRUD + refresh
   app.use(memoryRoutes.routes())
   app.use(modelRoutes.routes())
   app.use(providerRoutes.routes())
