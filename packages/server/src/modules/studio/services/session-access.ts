@@ -23,7 +23,16 @@
  * sessions are invisible" everywhere.
  */
 
+/** Fields carried by Hermes state.db history rows (channel sessions). */
+export interface HermesHistoryFields {
+  source?: string | null
+  user_id?: string | number | null
+}
+
 export type SessionAccess = 'full' | 'read_external' | 'none'
+
+import { findMappedUserId, isChannelSource } from '../repositories/external-identities-store'
+import { findUserById } from '../repositories/users-store'
 
 export interface SessionAccessUser {
   id: number | string
@@ -37,16 +46,45 @@ export interface SessionOwnershipFields {
   external_actor_id?: string | null
 }
 
-/** Reserved for future external-history read-only access. Returns the mapped
- *  Studio user for an external actor, or null when no reliable mapping
- *  exists. Phase 1: no mappings, always null. */
-export function resolveExternalActorUser(_session: SessionOwnershipFields): SessionAccessUser | null {
+/**
+ * External-actor mapping: returns the Studio user a channel actor maps to,
+ * or null. The mapping lives in external_identities (admin-managed).
+ * Accepts both Studio session shape (external_actor_*) and Hermes state.db
+ * history shape (channel source + user_id).
+ */
+export function resolveExternalActorUser(session: SessionOwnershipFields | HermesHistoryFields | null | undefined): SessionAccessUser | null {
+  const actor = externalActorOf(session)
+  if (!actor) return null
+  const userId = findMappedUserId(actor.source, actor.externalId)
+  if (userId == null) return null
+  const user = findUserById(userId)
+  if (!user || user.status !== 'active') return null
+  return { id: user.id, role: user.role }
+}
+
+/** Normalized external actor for a session row (either shape). */
+export interface ExternalActor {
+  source: string
+  externalId: string
+}
+
+export function externalActorOf(
+  session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
+): ExternalActor | null {
+  if (!session) return null
+  if (session.external_actor_source && session.external_actor_id) {
+    return { source: String(session.external_actor_source), externalId: String(session.external_actor_id) }
+  }
+  // Hermes state.db history shape: channel source + user_id
+  if (isChannelSource(session.source) && session.user_id != null && String(session.user_id).trim() !== '') {
+    return { source: String(session.source).toLowerCase(), externalId: String(session.user_id).trim() }
+  }
   return null
 }
 
 export function resolveSessionAccess(
   user: SessionAccessUser | null | undefined,
-  session: SessionOwnershipFields | null | undefined,
+  session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
 ): SessionAccess {
   if (!session) return 'none'
   if (user && session.owner_user_id != null && Number(session.owner_user_id) === Number(user.id)) {
@@ -54,8 +92,9 @@ export function resolveSessionAccess(
   }
   if (user?.role === 'super_admin') return 'full'
   if (user?.role === 'admin') return 'read_external'
-  // Plain 'user' without ownership: external history is a future read-only
-  // capability; local operation is never allowed.
+  // Plain 'user': read-only access to channel history mapped to them.
+  const mapped = resolveExternalActorUser(session)
+  if (mapped && Number(mapped.id) === Number(user?.id)) return 'read_external'
   return 'none'
 }
 

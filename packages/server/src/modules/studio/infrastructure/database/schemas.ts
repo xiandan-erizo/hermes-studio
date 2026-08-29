@@ -109,6 +109,25 @@ export const SESSIONS_INDEXES = {
   idx_sessions_ownership_state: 'CREATE INDEX IF NOT EXISTS idx_sessions_ownership_state ON sessions(ownership_state)',
 }
 
+// 外部渠道身份（飞书 open_id、钉钉用户串等）到 Studio 用户的映射。
+// 渠道会话不回填 owner；映射决定谁能只读查看该渠道的历史。
+export const EXTERNAL_IDENTITIES_TABLE = 'external_identities'
+
+export const EXTERNAL_IDENTITIES_SCHEMA: Record<string, string> = {
+  id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
+  source: 'TEXT NOT NULL',
+  external_id: 'TEXT NOT NULL',
+  user_id: 'INTEGER NOT NULL',
+  note: "TEXT NOT NULL DEFAULT ''",
+  created_at: 'INTEGER NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
+export const EXTERNAL_IDENTITIES_INDEXES = {
+  uniq_external_identities_source_external_id: 'CREATE UNIQUE INDEX IF NOT EXISTS uniq_external_identities_source_external_id ON external_identities(source, external_id)',
+  idx_external_identities_user: 'CREATE INDEX IF NOT EXISTS idx_external_identities_user ON external_identities(user_id)',
+}
+
 // 版本化数据迁移台账（与 syncTable 的 schema 同步不同，这里记录数据迁移）。
 export const SCHEMA_MIGRATIONS_TABLE = 'schema_migrations'
 
@@ -1574,6 +1593,9 @@ export function initAllHermesTables(): void {
     // Data-migration ledger + versioned session ownership backfill (dry-run by
     // default; the migration itself is guarded and idempotent).
     syncTable(SCHEMA_MIGRATIONS_TABLE, SCHEMA_MIGRATIONS_SCHEMA)
+    syncTable(EXTERNAL_IDENTITIES_TABLE, EXTERNAL_IDENTITIES_SCHEMA, {
+      indexes: EXTERNAL_IDENTITIES_INDEXES,
+    })
     migrateSessionOwnership(db)
     createIndexes(db, SESSION_CATEGORIES_INDEXES)
     createIndexes(db, SESSIONS_INDEXES)

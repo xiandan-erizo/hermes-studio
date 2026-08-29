@@ -53,7 +53,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -231,10 +231,26 @@ function mergeHermesHistorySessions(
     historySessionsById.set(session.id, { ...session, webui_imported: true })
   }
 
-  return filterPendingDeletedSessions(filterByAllowedProfiles(ctx, [...historySessionsById.values()]).filter(session =>
+  return filterPendingDeletedSessions(filterByChannelIdentity(ctx, filterByAllowedProfiles(ctx, [...historySessionsById.values()]).filter(session =>
     (!source || session.source === source) &&
     (isHermesHistorySessionSource(session.source) || (isArchivedSession(session) && session.source !== 'global_agent')),
-  ))
+  )))
+}
+
+/**
+ * Channel-history visibility for plain users (P0): they see only sessions
+ * whose external actor maps to them (read-only); local sessions need
+ * ownership. Admins keep profile-wide review visibility.
+ */
+function filterByChannelIdentity<T>(ctx: any, items: T[]): T[] {
+  const user = ctx.state?.user
+  if (!user || user.role === 'super_admin' || user.role === 'admin') return items
+  return items.filter(item => {
+    const row = item as any
+    if (row.owner_user_id != null) return Number(row.owner_user_id) === Number(user.id)
+    const mapped = resolveExternalActorUser(row)
+    return mapped != null && Number(mapped.id) === Number(user.id)
+  })
 }
 
 function isCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {

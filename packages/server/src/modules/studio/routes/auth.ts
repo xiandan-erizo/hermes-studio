@@ -1,6 +1,7 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/auth'
 import * as inviteCtrl from '../controllers/invites'
+import * as externalIdentityCtrl from '../controllers/external-identities'
 import * as ssoCtrl from '../controllers/sso'
 import { requireSuperAdmin, requireAdmin } from '../middleware/auth'
 
@@ -29,6 +30,10 @@ authProtectedRoutes.get('/api/auth/users', requireSuperAdmin, ctrl.listManagedUs
 authProtectedRoutes.post('/api/auth/users', requireSuperAdmin, ctrl.createManagedUser)
 authProtectedRoutes.put('/api/auth/users/:id', requireSuperAdmin, ctrl.updateManagedUser)
 authProtectedRoutes.delete('/api/auth/users/:id', requireSuperAdmin, ctrl.deleteManagedUser)
+authProtectedRoutes.get('/api/auth/external-identities', requireAdmin, externalIdentityCtrl.listMappings)
+authProtectedRoutes.get('/api/auth/external-identities/candidates', requireAdmin, externalIdentityCtrl.listCandidates)
+authProtectedRoutes.post('/api/auth/external-identities', requireAdmin, externalIdentityCtrl.createMapping)
+authProtectedRoutes.delete('/api/auth/external-identities/:id', requireAdmin, externalIdentityCtrl.removeMapping)
 authProtectedRoutes.get('/api/auth/invites', requireAdmin, inviteCtrl.listInviteRecords)
 authProtectedRoutes.post('/api/auth/invites', requireAdmin, inviteCtrl.createInviteRecord)
 authProtectedRoutes.delete('/api/auth/invites/:code', requireAdmin, inviteCtrl.revokeInviteRecord)
