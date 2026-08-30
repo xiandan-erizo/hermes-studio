@@ -1497,6 +1497,7 @@ async function applyBridgeChunkAsync(
       replaceState(sessionMap, sessionId, 'moa.aggregating', payload)
       emit('moa.aggregating', payload)
     } else if (evType === 'approval.requested') {
+      const requestedAt = Date.now()
       const payload = {
         event: 'approval.requested',
         run_id: chunk.run_id,
@@ -1506,6 +1507,8 @@ async function applyBridgeChunkAsync(
         choices: ev.choices,
         allow_permanent: ev.allow_permanent,
         timeout_ms: ev.timeout_ms,
+        remaining_timeout_ms: ev.timeout_ms,
+        requested_at: requestedAt,
       }
       replaceState(sessionMap, sessionId, 'approval.requested', payload)
       emit('approval.requested', payload)
@@ -1519,6 +1522,7 @@ async function applyBridgeChunkAsync(
       replaceState(sessionMap, sessionId, 'approval.resolved', payload)
       emit('approval.resolved', payload)
     } else if (evType === 'clarify.requested') {
+      const requestedAt = Date.now()
       const payload = {
         event: 'clarify.requested',
         run_id: chunk.run_id,
@@ -1526,6 +1530,8 @@ async function applyBridgeChunkAsync(
         question: ev.question,
         choices: Array.isArray(ev.choices) ? ev.choices : null,
         timeout_ms: ev.timeout_ms,
+        remaining_timeout_ms: ev.timeout_ms,
+        requested_at: requestedAt,
       }
       replaceState(sessionMap, sessionId, 'clarify.requested', payload)
       emit('clarify.requested', payload)
