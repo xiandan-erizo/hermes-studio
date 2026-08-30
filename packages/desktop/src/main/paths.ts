@@ -10,7 +10,7 @@ import {
 import { hermesAgentVersionFromRuntimeTag } from './runtime-version'
 
 const isWin = platform() === 'win32'
-const DEFAULT_HERMES_AGENT_VERSION = '0.20.0'
+const DEFAULT_HERMES_AGENT_VERSION = '0.20.6'
 const PACKAGED_RUNTIME_RELEASE_NAME = 'runtime-release.json'
 const ACTIVE_RUNTIME_VERSION_NAME = 'active-version.json'
 let incompleteActiveWebUiWarningPath = ''
@@ -459,23 +459,8 @@ export function hermesHome(): string {
   const override = process.env.HERMES_HOME?.trim()
   if (override) return resolve(override)
 
-  const defaultHome = resolve(homedir(), '.hermes')
-
-  if (isWin) {
-    const candidates = [
-      process.env.LOCALAPPDATA,
-      process.env.APPDATA,
-    ]
-      .map(value => value?.trim())
-      .filter((value): value is string => !!value)
-      .map(value => resolve(value, 'hermes'))
-
-    for (const candidate of candidates) {
-      if (existsSync(candidate)) return candidate
-    }
-  }
-
-  return defaultHome
+  const userHome = isWin ? process.env.USERPROFILE?.trim() || homedir() : homedir()
+  return resolve(userHome, '.hermes')
 }
 
 export function tokenFile(): string {

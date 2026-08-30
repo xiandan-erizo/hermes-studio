@@ -1,15 +1,18 @@
-import { EkkoDatabaseManager } from './database'
+import { randomUUID } from 'node:crypto'
+import { chmodSync, copyFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { EkkoDatabaseManager, EkkoDatabaseMigrationError } from './database'
 import {
   EkkoDirectoryManager,
   type EkkoDirectoryInitializationOptions,
   type EkkoDirectoryLayout,
-  type EkkoSkillImportResult,
 } from './directories'
 import { MemoryService } from './memory/service'
-import { resolveEkkoDatabasePath } from './memory/paths'
+import { resolveEkkoDataDirectory } from './memory/paths'
 import { SqliteMemoryStore } from './memory/store'
 import { EkkoToolApprovalService } from './tools/approval'
 import {
+  EkkoConfigError,
   EkkoConfigStore,
   type ConfiguredModelAuthorizationEntry,
   type ConfiguredModelProviderEntry,
@@ -37,6 +40,7 @@ import type { AgentRuntimeOptions } from './runtime/types'
 import { createDefaultToolRegistry } from './tools/registry'
 import { EkkoToolManager } from './tools/manager'
 import { EkkoSkillManager } from './skills/manager'
+import { resolveEkkoExternalSkillDirectories } from './skills/external-directories'
 import { EkkoFileLogger } from './logging/file-logger'
 import type {
   EkkoConfig,
@@ -47,9 +51,23 @@ import type {
 import { EkkoAgentManager } from './agent/manager'
 import { EkkoProfileAgent } from './agent/profile-agent'
 
+const EKKO_DATABASE_RECOVERY_TABLES = [
+  'memory_messages',
+  'memory_nodes',
+  'memory_audit_events',
+  'memory_embeddings',
+  'sessions',
+  'messages',
+] as const
+
 export interface SetupEkkoAgentOptions extends EkkoDirectoryInitializationOptions {
   baseDirectory?: string
   profiles?: string[]
+  /**
+   * Installation-wide config patch applied to the canonical config before
+   * Profile agents and runtime services are created.
+   */
+  config?: EkkoConfigPatch
   env?: Record<string, string | undefined>
   packageRoot?: string
   authorizationRefresher?: EkkoModelAuthorizationRefresher
@@ -72,6 +90,32 @@ export interface CreateEkkoRuntimeOptions extends Omit<AgentRuntimeOptions, 'mem
   clientOptions?: ModelClientOptions
   /** Disable the shared memory service for this runtime without changing global config. */
   memory?: AgentRuntimeOptions['memory'] | false
+}
+
+function ensureStartupConfig(config: EkkoConfigStore): EkkoConfig {
+  try {
+    return config.ensureDefaults()
+  } catch (error) {
+    if (!(error instanceof EkkoConfigError)) throw error
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const backupPath = join(
+      dirname(config.configPath),
+      `config.invalid-${timestamp}-${randomUUID()}.json`,
+    )
+    copyFileSync(config.configPath, backupPath)
+    try {
+      chmodSync(backupPath, 0o600)
+    } catch {
+      // Some filesystems do not expose POSIX permissions.
+    }
+
+    const recovered = config.reset()
+    console.warn(
+      `[ekko-agent] invalid config was backed up to ${backupPath}; defaults restored: ${error.message}`,
+    )
+    return recovered
+  }
 }
 
 /**
@@ -98,7 +142,6 @@ export class EkkoAgentSetup {
   readonly agent: EkkoAgentManager
   readonly agents: EkkoAgentManager
   readonly default: EkkoProfileAgent
-  readonly skillImport?: EkkoSkillImportResult
   private readonly profileLayouts = new Map<string, EkkoProfileDirectoryLayout>()
   private readonly directProfileProperties = new Set<string>()
   private currentToolApprovals: EkkoToolApprovalService
@@ -106,20 +149,20 @@ export class EkkoAgentSetup {
   private closed = false
 
   constructor(options: SetupEkkoAgentOptions = {}) {
-    this.directories = new EkkoDirectoryManager(options.baseDirectory)
-    this.layout = {
-      ...this.directories.initialize({
-        hermesRootDirectory: options.hermesRootDirectory,
-      }),
-      databasePath: resolveEkkoDatabasePath({
-        baseDirectory: options.baseDirectory,
-        env: options.env,
-        packageRoot: options.packageRoot,
-      }),
-    }
-    this.skillImport = this.directories.lastSkillImport
+    const dataDirectory = resolveEkkoDataDirectory({
+      baseDirectory: options.baseDirectory,
+      env: options.env,
+      packageRoot: options.packageRoot,
+    })
+    this.directories = new EkkoDirectoryManager(dirname(dataDirectory))
+    this.layout = this.directories.initialize({
+      hermesRootDirectory: options.hermesRootDirectory,
+    })
     this.config = new EkkoConfigStore({ configPath: this.layout.configPath })
-    const config = this.config.ensureDefaults()
+    const startupConfig = ensureStartupConfig(this.config)
+    const config = options.config
+      ? this.config.update(options.config)
+      : startupConfig
     this.authorizations = new EkkoModelAuthorizationManager({
       config: this.config,
       refresher: options.authorizationRefresher,
@@ -127,12 +170,19 @@ export class EkkoAgentSetup {
       now: options.authorizationNow,
     })
     this.currentToolApprovals = this.createToolApprovals(config)
-    this.unsubscribeConfig = this.config.onDidChange(nextConfig => {
-      this.currentToolApprovals = this.createToolApprovals(nextConfig)
-    })
     this.authorization = this.authorizations
     this.tool = new EkkoToolManager({
       createRegistry: profile => this.createProfileToolRegistry(profile),
+    })
+    this.unsubscribeConfig = this.config.onDidChange(nextConfig => {
+      this.currentToolApprovals = this.createToolApprovals(nextConfig)
+      this.tool.invalidate()
+      this.memory?.configure({
+        enabled: nextConfig.memory.enabled,
+        recentMessageLimit: nextConfig.memory.recentMessageLimit,
+        automaticRecallTokenBudget: nextConfig.memory.automaticRecallTokenBudget,
+        searchResultLimit: nextConfig.memory.searchResultLimit,
+      })
     })
     this.skill = new EkkoSkillManager(this.tool)
     this.model = new EkkoModelManager({
@@ -144,20 +194,55 @@ export class EkkoAgentSetup {
     this.runtime = new EkkoRuntimeManager({
       create: runtimeOptions => this.createRuntime(runtimeOptions),
     })
-    this.database = new EkkoDatabaseManager({
+    let database = new EkkoDatabaseManager({
       databasePath: this.layout.databasePath,
       env: options.env,
     })
-
+    let memoryStore: SqliteMemoryStore
+    let conversations: EkkoConversationStore
     try {
-      this.memoryStore = new SqliteMemoryStore(this.database)
-      this.memory = this.createMemoryService(config)
-      this.conversations = new EkkoConversationStore(this.database)
-      this.conversation = this.conversations
+      memoryStore = new SqliteMemoryStore(database)
+      conversations = new EkkoConversationStore(database)
     } catch (error) {
-      this.database.close()
-      throw error
+      database.close()
+      if (!(error instanceof EkkoDatabaseMigrationError) || error.lockFailure) throw error
+
+      const backupPath = database.quarantineForRebuild()
+      database = new EkkoDatabaseManager({
+        databasePath: this.layout.databasePath,
+        env: options.env,
+      })
+      try {
+        memoryStore = new SqliteMemoryStore(database)
+        conversations = new EkkoConversationStore(database)
+      } catch (rebuildError) {
+        database.restoreQuarantinedDatabase(backupPath)
+        throw new Error(
+          `Ekko database rebuild failed; the original database was restored from ${backupPath}.`,
+          { cause: rebuildError },
+        )
+      }
+
+      try {
+        const recovery = database.recoverCompatibleTables(backupPath, EKKO_DATABASE_RECOVERY_TABLES)
+        memoryStore.rebuildSearchIndex()
+        console.warn(
+          `[ekko-agent] database rebuilt after migration failure; backup=${backupPath}; ` +
+          `recovered=${JSON.stringify(recovery.recoveredTables)}; skipped=${JSON.stringify(recovery.skippedTables)}`,
+        )
+      } catch (recoveryError) {
+        console.warn(
+          `[ekko-agent] database rebuilt but data recovery could not read the backup at ${backupPath}: ` +
+          `${recoveryError instanceof Error ? recoveryError.message : String(recoveryError)}`,
+        )
+      }
     }
+
+    this.database = database
+    this.memoryStore = memoryStore
+    this.memory = this.createMemoryService(config, memoryStore)
+    this.conversations = conversations
+    this.conversation = conversations
 
     this.agent = new EkkoAgentManager({
       create: profile => this.createProfileAgent(profile),
@@ -169,7 +254,6 @@ export class EkkoAgentSetup {
     const profiles = new Set([
       'default',
       ...this.directories.profileNames(),
-      ...(this.skillImport?.profiles ?? []),
       ...(options.profiles ?? []),
     ])
     try {
@@ -273,6 +357,19 @@ export class EkkoAgentSetup {
     const toolsEnabled = runtimeOverrides.toolsEnabled ?? config.tools.enabled
     const skillsEnabled = runtimeOverrides.skillsEnabled ?? config.skills.enabled
     const skillDirectory = runtimeOverrides.skillDirectory ?? profileLayout.skillDirectory
+    const profileSkillConfig = config.skills.profiles[profileLayout.profile] ?? {
+      disabled: [],
+      externalDirectories: [],
+    }
+    const usesProfileSkillDirectory = skillDirectory === profileLayout.skillDirectory
+    const externalSkillDirectories = runtimeOverrides.externalSkillDirectories
+      ?? (usesProfileSkillDirectory
+        ? resolveEkkoExternalSkillDirectories(profileSkillConfig.externalDirectories, {
+            localSkillDirectory: profileLayout.skillDirectory,
+          })
+        : [])
+    const disabledSkillNames = runtimeOverrides.disabledSkillNames
+      ?? (usesProfileSkillDirectory ? profileSkillConfig.disabled : [])
     const toolAuthorizer = runtimeOverrides.toolAuthorizer ?? this.toolApprovals.authorize
     const selectedProvider = String(provider || config.model.defaultProvider || '').trim()
     const modelClient = runtimeOverrides.modelClient ?? (selectedProvider
@@ -281,9 +378,14 @@ export class EkkoAgentSetup {
     const tools = runtimeOverrides.tools ?? (toolsEnabled
       ? this.tool.createRuntimeRegistry(
           profile,
-          skillDirectory === profileLayout.skillDirectory
+          usesProfileSkillDirectory
             ? undefined
-            : this.createProfileToolRegistry(profile, skillDirectory),
+            : this.createProfileToolRegistry(
+                profile,
+                skillDirectory,
+                externalSkillDirectories,
+                disabledSkillNames,
+              ),
         )
       : undefined)
     const modelDefaults = {
@@ -291,6 +393,12 @@ export class EkkoAgentSetup {
       ...runtimeOverrides.modelDefaults,
       ...(model ? { model } : {}),
     }
+    const configuredMcpServers = config.mcp.enabled
+      ? config.mcp.profiles[profileLayout.profile]?.servers ?? {}
+      : {}
+    const toolContext = runtimeOverrides.toolContext?.mcpServers === undefined
+      ? { ...runtimeOverrides.toolContext, mcpServers: configuredMcpServers }
+      : runtimeOverrides.toolContext
 
     return new AgentRuntime({
       ...runtimeOverrides,
@@ -299,9 +407,12 @@ export class EkkoAgentSetup {
       toolsEnabled,
       tools,
       toolAuthorizer,
+      toolContext,
       skillsEnabled,
       skills: runtimeOverrides.skills ?? this.skill.runtimeSkills(profile),
       skillDirectory,
+      externalSkillDirectories,
+      disabledSkillNames,
       skillReviewEveryToolCalls: runtimeOverrides.skillReviewEveryToolCalls
         ?? config.skills.reviewEveryToolCalls,
       runtimeInstructions: runtimeOverrides.runtimeInstructions ?? config.prompt.instructions,
@@ -315,7 +426,7 @@ export class EkkoAgentSetup {
       modelDefaults,
       memory: memory === false
         ? undefined
-        : memory ?? (config.memory.enabled ? this.createMemoryService(config) : undefined),
+        : memory ?? (config.memory.enabled ? this.memory : undefined),
       logWriter: runtimeOverrides.logWriter ?? new EkkoFileLogger({
         directory: profileLayout.logDirectory,
         maxBytes: config.logging.maxBytes,
@@ -380,11 +491,21 @@ export class EkkoAgentSetup {
     delete (this as Record<string, unknown>)[profileAgent.profile]
   }
 
-  private createProfileToolRegistry(profile: string, skillDirectory?: string) {
+  private createProfileToolRegistry(
+    profile: string,
+    skillDirectory?: string,
+    externalSkillDirectories = resolveEkkoExternalSkillDirectories(
+      this.config.getSkillProfile(profile).externalDirectories,
+      { localSkillDirectory: this.ensureProfile(profile).skillDirectory },
+    ),
+    disabledSkillNames = this.config.getSkillProfile(profile).disabled,
+  ) {
     const config = this.config.read()
     const profileLayout = this.ensureProfile(profile)
     return createDefaultToolRegistry({
       skillDirectory: skillDirectory ?? profileLayout.skillDirectory,
+      externalSkillDirectories,
+      disabledSkillNames,
       authorizer: (name, input, context) => this.toolApprovals.authorize(name, input, context),
       executionTimeoutMs: config.tools.executionTimeoutMs,
       codeExec: {
@@ -399,14 +520,13 @@ export class EkkoAgentSetup {
     })
   }
 
-  private createMemoryService(config: EkkoConfig): MemoryService {
+  private createMemoryService(config: EkkoConfig, store = this.memoryStore): MemoryService {
     return new MemoryService({
-      store: this.memoryStore,
+      store,
       enabled: config.memory.enabled,
       recentMessageLimit: config.memory.recentMessageLimit,
       automaticRecallTokenBudget: config.memory.automaticRecallTokenBudget,
       searchResultLimit: config.memory.searchResultLimit,
-      reviewEveryUserMessages: config.memory.reviewEveryUserMessages,
     })
   }
 }
