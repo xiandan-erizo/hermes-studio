@@ -25,6 +25,28 @@ vi.mock('naive-ui', () => ({
 }))
 
 describe('SkillList', () => {
+  it('shows skill toggles when toggleable is omitted', () => {
+    const wrapper = mount(SkillList, {
+      props: {
+        categories: [
+          {
+            name: 'tools',
+            description: '',
+            skills: [
+              { name: 'local-skill', description: '', enabled: true, source: 'local' },
+            ],
+          },
+        ],
+        archived: [],
+        selectedSkill: null,
+        searchQuery: '',
+        sourceFilter: null,
+      },
+    })
+
+    expect(wrapper.findComponent({ name: 'NSwitch' }).exists()).toBe(true)
+  })
+
   it('supports filtering skills from external sources', () => {
     const wrapper = mount(SkillList, {
       props: {
