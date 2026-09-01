@@ -53,6 +53,7 @@ import SubagentStreamPanel from "./SubagentStreamPanel.vue";
 import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./session-category-groups";
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
+import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
 import { isStoredSuperAdmin } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
@@ -1572,10 +1573,6 @@ const contextMenuCategoriesKey = computed(() => [
   ...sessionCategories.value.map(category => `${category.id}:${category.name}`),
 ].join("|"));
 
-function openSettingsPage() {
-  router.push({ name: "hermes.settings" });
-}
-
 function handleContextMenu(e: MouseEvent, sessionId: string) {
   e.preventDefault();
   showCategoryContextMenu.value = false;
@@ -2278,24 +2275,7 @@ async function handleSessionModelCustomSubmit() {
           </template>
         </template>
       </div>
-      <div v-if="showSessions" class="page-sidebar-bottom">
-        <button class="page-sidebar-menu-btn" type="button" @click="openSettingsPage">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.8"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
-          <span>{{ t("sidebar.settings") }}</span>
-        </button>
-      </div>
+      <PageSidebarFooter v-if="showSessions" />
     </aside>
 
     <NDropdown

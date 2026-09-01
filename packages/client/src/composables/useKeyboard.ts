@@ -1,10 +1,12 @@
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSessionSearch } from './useSessionSearch'
+import { isStoredUser } from '@/api/client'
 
 export function useKeyboard() {
   const router = useRouter()
   const { sessionSearchOpen, openSessionSearch, closeSessionSearch } = useSessionSearch()
+  const isPlainUser = isStoredUser()
 
   function handleKeydown(e: KeyboardEvent) {
     const mod = e.ctrlKey || e.metaKey
@@ -18,13 +20,14 @@ export function useKeyboard() {
     }
 
     if (mod && e.key === 'j') {
+      if (isPlainUser) return
       e.preventDefault()
       router.push({ name: 'hermes.jobs' })
       return
     }
 
     if (mod && e.key.toLowerCase() === 'k') {
-      if (router.currentRoute.value.name === 'login') return
+      if (isPlainUser || router.currentRoute.value.name === 'login') return
       e.preventDefault()
       openSessionSearch()
       return

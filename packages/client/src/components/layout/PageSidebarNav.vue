@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { NTooltip } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { isStoredSuperAdmin } from '@/api/client'
+import { isStoredSuperAdmin, isStoredUser } from '@/api/client'
 import { useSessionSearch } from '@/composables/useSessionSearch'
 
 type ActiveSection = 'chat' | 'history' | 'connections' | 'agents' | 'models' | 'group' | 'global' | 'workflow'
@@ -21,6 +21,7 @@ const { t } = useI18n()
 const router = useRouter()
 const { openSessionSearch } = useSessionSearch()
 const canManageAgents = computed(() => isStoredSuperAdmin())
+const isPlainUser = computed(() => isStoredUser())
 
 const primaryText = computed(() => props.primaryLabel || t('chat.newChat'))
 
@@ -86,7 +87,7 @@ function openApiRelay() {
         </svg>
         <span>{{ primaryText }}</span>
       </button>
-      <button class="page-sidebar-tab" type="button" @click="openSessionSearch">
+      <button v-if="!isPlainUser" class="page-sidebar-tab" type="button" @click="openSessionSearch">
         <svg
           width="15"
           height="15"
@@ -101,6 +102,7 @@ function openApiRelay() {
         <span>{{ t('sidebar.search') }}</span>
       </button>
       <button
+        v-if="!isPlainUser"
         class="page-sidebar-tab"
         :class="{ active: active === 'connections' }"
         type="button"
@@ -151,6 +153,7 @@ function openApiRelay() {
         <span>{{ t('sidebar.agentManager') }}</span>
       </button>
       <button
+        v-if="!isPlainUser"
         class="page-sidebar-tab"
         :class="{ active: active === 'models' }"
         type="button"
@@ -173,7 +176,7 @@ function openApiRelay() {
         </svg>
         <span>{{ t('sidebar.models') }}</span>
       </button>
-      <button class="page-sidebar-tab" type="button" @click="openApiRelay">
+      <button v-if="!isPlainUser" class="page-sidebar-tab" type="button" @click="openApiRelay">
         <svg
           width="15"
           height="15"
@@ -189,7 +192,12 @@ function openApiRelay() {
         <span>{{ t('sidebar.apiRelay') }}</span>
       </button>
     </div>
-    <div class="conversation-switch conversation-switch--four" role="tablist" aria-label="Conversation type">
+    <div
+      class="conversation-switch"
+      :class="{ 'conversation-switch--four': !isPlainUser }"
+      role="tablist"
+      aria-label="Conversation type"
+    >
       <NTooltip trigger="hover" placement="top">
         <template #trigger>
           <button
@@ -208,7 +216,7 @@ function openApiRelay() {
         </template>
         {{ t('sidebar.singleChat') }}
       </NTooltip>
-      <NTooltip trigger="hover" placement="top">
+      <NTooltip v-if="!isPlainUser" trigger="hover" placement="top">
         <template #trigger>
           <button
             class="conversation-switch-tab"
@@ -229,7 +237,7 @@ function openApiRelay() {
         </template>
         {{ t('sidebar.groupChat') }}
       </NTooltip>
-      <NTooltip trigger="hover" placement="top">
+      <NTooltip v-if="!isPlainUser" trigger="hover" placement="top">
         <template #trigger>
           <button
             class="conversation-switch-tab"

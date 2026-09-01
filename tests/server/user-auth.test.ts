@@ -168,6 +168,46 @@ describe('user auth tables and middleware', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
+  it('limits plain users to the chat and history API surface', async () => {
+    const { auth } = await initUsers()
+
+    expect(auth.isPlainUserApiPathAllowed).toBeTypeOf('function')
+    expect(auth.isPlainUserApiPathAllowed('GET', '/api/studio/sessions')).toBe(true)
+    expect(auth.isPlainUserApiPathAllowed('POST', '/api/studio/chat-run/runs')).toBe(true)
+    expect(auth.isPlainUserApiPathAllowed('GET', '/api/hermes/marketplace/sources')).toBe(false)
+    expect(auth.isPlainUserApiPathAllowed('GET', '/api/studio/group-chat/rooms')).toBe(false)
+    expect(auth.isPlainUserApiPathAllowed('PUT', '/api/hermes/config')).toBe(false)
+    expect(auth.isPlainUserApiPathAllowed('GET', '/api/hermes/profiles/default')).toBe(false)
+    expect(auth.isPlainUserApiPathAllowed('POST', '/api/hermes/skills/import')).toBe(false)
+  })
+
+  it('enforces the plain-user API surface before route handlers run', async () => {
+    const { auth } = await initUsers()
+    const plainUserCtx = {
+      ...makeCtx({ id: 1, username: 'member', role: 'user' }, 'default'),
+      method: 'GET',
+      path: '/api/hermes/marketplace/sources',
+    } as any
+    const deniedNext = vi.fn(async () => {})
+
+    await auth.requirePlainUserSurface(plainUserCtx, deniedNext)
+
+    expect(plainUserCtx.status).toBe(403)
+    expect(plainUserCtx.body).toEqual({ error: 'This account is limited to chat and history' })
+    expect(deniedNext).not.toHaveBeenCalled()
+
+    const adminCtx = {
+      ...makeCtx({ id: 1, username: 'ops', role: 'admin' }, 'default'),
+      method: 'GET',
+      path: '/api/hermes/marketplace/sources',
+    } as any
+    const allowedNext = vi.fn(async () => {})
+
+    await auth.requirePlainUserSurface(adminCtx, allowedNext)
+
+    expect(allowedNext).toHaveBeenCalledOnce()
+  })
+
   it('does not infer a profile when the frontend does not send one', async () => {
     const { auth } = await initUsers()
     const ctx = makeCtx({ id: 1, username: 'admin', role: 'super_admin' }, '')

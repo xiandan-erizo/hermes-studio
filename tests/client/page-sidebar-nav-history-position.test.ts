@@ -12,7 +12,7 @@ const historyViewSource = readFileSync(
 
 describe('page sidebar conversation switch', () => {
   it('places history after single chat, group chat, and workflow', () => {
-    const switchStart = navSource.indexOf('conversation-switch conversation-switch--four')
+    const switchStart = navSource.indexOf('class="conversation-switch"')
     const switchSource = navSource.slice(switchStart)
 
     expect(switchStart).toBeGreaterThan(-1)

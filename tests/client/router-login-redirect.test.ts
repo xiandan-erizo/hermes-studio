@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockHasApiKey = vi.hoisted(() => vi.fn())
 const mockIsStoredSuperAdmin = vi.hoisted(() => vi.fn())
+const mockIsStoredUser = vi.hoisted(() => vi.fn())
 
 vi.mock('@/api/client', () => ({
   hasApiKey: mockHasApiKey,
   isStoredSuperAdmin: mockIsStoredSuperAdmin,
+  isStoredUser: mockIsStoredUser,
 }))
 
 async function loadRouter() {
@@ -18,6 +20,7 @@ describe('router login redirect', () => {
   beforeEach(() => {
     mockHasApiKey.mockReturnValue(false)
     mockIsStoredSuperAdmin.mockReturnValue(true)
+    mockIsStoredUser.mockReturnValue(false)
     if (!document.queryCommandSupported) {
       document.queryCommandSupported = vi.fn(() => false)
     }
@@ -63,5 +66,18 @@ describe('router login redirect', () => {
     await router.isReady()
 
     expect(router.currentRoute.value.name).toBe('login')
+  })
+
+  it('limits plain users to chat and history routes', async () => {
+    mockHasApiKey.mockReturnValue(true)
+    mockIsStoredSuperAdmin.mockReturnValue(false)
+    mockIsStoredUser.mockReturnValue(true)
+    const router = await loadRouter()
+
+    await router.push({ name: 'hermes.marketplace' })
+    expect(router.currentRoute.value.name).toBe('hermes.chat')
+
+    await router.push({ name: 'hermes.history' })
+    expect(router.currentRoute.value.name).toBe('hermes.history')
   })
 })

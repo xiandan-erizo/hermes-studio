@@ -80,6 +80,10 @@ export function isStoredSuperAdmin(): boolean {
   return getStoredUserRole() === 'super_admin'
 }
 
+export function isStoredUser(): boolean {
+  return getStoredUserRole() === 'user'
+}
+
 export function isStoredElevatedUser(): boolean {
   const role = getStoredUserRole()
   return role === 'super_admin' || role === 'admin'

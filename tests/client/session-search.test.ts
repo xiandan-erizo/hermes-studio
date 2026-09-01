@@ -8,6 +8,11 @@ const apiMocks = vi.hoisted(() => ({
   searchSessionsMock: vi.fn(),
   routerPushMock: vi.fn(),
 }))
+const mockIsStoredUser = vi.hoisted(() => vi.fn())
+
+vi.mock('@/api/client', () => ({
+  isStoredUser: mockIsStoredUser,
+}))
 
 vi.mock('@/api/studio/sessions', () => ({
   fetchSessions: apiMocks.fetchSessionsMock,
@@ -78,6 +83,7 @@ describe('session search modal', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
+    mockIsStoredUser.mockReturnValue(false)
     chatStoreMock.sessions = []
     chatStoreMock.loadSessions.mockResolvedValue(undefined)
     chatStoreMock.switchSession.mockResolvedValue(undefined)
@@ -201,11 +207,31 @@ describe('keyboard shortcut', () => {
       },
     })
 
-    mount(Dummy)
+    const wrapper = mount(Dummy)
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))
     await nextTick()
 
     expect(useSessionSearch().sessionSearchOpen.value).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not expose search or Jobs shortcuts to plain users', async () => {
+    mockIsStoredUser.mockReturnValue(true)
+    const Dummy = defineComponent({
+      setup() {
+        useKeyboard()
+        return () => h('div')
+      },
+    })
+
+    mount(Dummy)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true }))
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j', ctrlKey: true }))
+    await nextTick()
+
+    expect(useSessionSearch().sessionSearchOpen.value).toBe(false)
+    expect(apiMocks.routerPushMock).not.toHaveBeenCalled()
   })
 })

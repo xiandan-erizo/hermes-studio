@@ -9,6 +9,8 @@ export {
   requireSuperAdmin,
   requireUserProfile,
   requireElevatedApi,
+  requirePlainUserSurface,
+  isPlainUserApiPathAllowed,
   type AuthenticatedUser,
 } from '../middleware/auth'
 

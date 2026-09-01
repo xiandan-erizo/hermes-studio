@@ -1,5 +1,5 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
-import { hasApiKey, isStoredSuperAdmin, isStoredElevatedUser } from '@/api/client'
+import { hasApiKey, isStoredSuperAdmin, isStoredElevatedUser, isStoredUser } from '@/api/client'
 import { hasDesktopBrowserBridge } from '@/utils/desktop-bridge'
 import { resolveLoginRedirect } from '@/utils/login-redirect'
 
@@ -290,6 +290,13 @@ const router = createRouter({
   ],
 })
 
+const PLAIN_USER_ALLOWED_ROUTES = new Set([
+  'hermes.chat',
+  'hermes.session',
+  'hermes.history',
+  'hermes.historySession',
+])
+
 // Desktop exposes a dedicated settings page. Actual browsing stays inside the
 // chat tool panel so this route never creates or positions a WebContentsView.
 if (hasDesktopBrowserBridge()) {
@@ -333,6 +340,11 @@ router.beforeEach(async (to, _from, next) => {
   // All other pages require token
   if (!hasApiKey()) {
     next({ name: 'login', query: { redirect: to.fullPath } })
+    return
+  }
+
+  if (isStoredUser() && !PLAIN_USER_ALLOWED_ROUTES.has(String(to.name || ''))) {
+    next({ name: 'hermes.chat' })
     return
   }
 
