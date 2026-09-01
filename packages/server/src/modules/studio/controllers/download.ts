@@ -78,8 +78,14 @@ export async function download(ctx: any) {
 
   try {
     const profile = requestedProfile(ctx)
-    // Validate the path first
-    // Support both absolute and relative paths
+    // Absolute paths may point anywhere on the Studio host, so only the
+    // super administrator may use them. Other users stay inside their
+    // request-scoped Profile through resolveProfileFilePath().
+    if (isAbsolute(filePath) && ctx.state?.user?.role !== 'super_admin') {
+      ctx.status = 403
+      ctx.body = { error: 'Absolute file paths require super administrator privileges', code: 'permission_denied' }
+      return
+    }
     const validPath = isAbsolute(filePath) ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
 
     // Choose provider: always use local for upload directory files
