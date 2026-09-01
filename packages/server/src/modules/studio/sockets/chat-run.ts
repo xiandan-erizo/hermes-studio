@@ -325,22 +325,12 @@ export class ChatRunSocket {
     }
     const resolveRunProfile = (sessionId?: string, requested?: string) => {
       const requestedProfile = typeof requested === 'string' ? requested.trim() : ''
-      if (requestedProfile) {
-        if (!profileExists(requestedProfile)) throw new Error(`Profile "${requestedProfile}" does not exist`)
-        if (socketUser && !this.canAccessProfile(socketUser, requestedProfile)) {
-          throw new Error(`Profile "${requestedProfile}" is not available for this user`)
-        }
-        return requestedProfile
+      const storedProfile = sessionId ? String(getSession(sessionId)?.profile || '').trim() : ''
+      if (storedProfile && requestedProfile && storedProfile !== requestedProfile) {
+        throw new Error(`Session belongs to profile "${storedProfile}", not "${requestedProfile}"`)
       }
-      if (!sessionId) {
-        const profile = currentProfile()
-        if (socketUser && !this.canAccessProfile(socketUser, profile)) {
-          throw new Error(`Profile "${profile}" is not available for this user`)
-        }
-        return profile
-      }
-      const storedProfile = getSession(sessionId)?.profile || ''
-      const profile = storedProfile && profileExists(storedProfile) ? storedProfile : currentProfile()
+      const profile = storedProfile || requestedProfile || currentProfile()
+      if (!profileExists(profile)) throw new Error(`Profile "${profile}" does not exist`)
       if (socketUser && !this.canAccessProfile(socketUser, profile)) {
         throw new Error(`Profile "${profile}" is not available for this user`)
       }

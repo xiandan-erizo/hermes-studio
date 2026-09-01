@@ -442,6 +442,26 @@ describe('ChatRunSocket bridge readiness gating', () => {
     }))
   })
 
+  it('rejects an explicit Profile that differs from an existing Session Profile', async () => {
+    getSessionMock.mockReturnValueOnce({
+      id: 'session-1', profile: 'research', source: 'cli', owner_user_id: 7,
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({
+      input: 'hello', session_id: 'session-1', source: 'cli', profile: 'default',
+    })
+
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
+      session_id: 'session-1',
+      error: 'Session belongs to profile "research", not "default"',
+    }))
+  })
+
   it('routes legacy api_server runs through the bridge path', async () => {
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
     const { handlers, io, socket } = makeServerHarness()

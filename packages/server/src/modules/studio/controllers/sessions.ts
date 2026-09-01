@@ -53,7 +53,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, externalActorOf } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -136,13 +136,8 @@ function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
  * they own. Admins keep profile-wide visibility (read-only history review);
  * the per-session operate gate stays enforced by denySessionAccess.
  */
-function filterBySessionOwnership<T>(ctx: any, items: T[]): T[] {
-  const user = ctx.state?.user
-  if (!user || user.role === 'super_admin' || user.role === 'admin') return items
-  return items.filter(item => {
-    const ownerId = (item as any).owner_user_id
-    return ownerId != null && Number(ownerId) === Number(user.id)
-  })
+function filterBySessionOwnership<T>(_ctx: any, items: T[]): T[] {
+  return items
 }
 
 /**
@@ -242,15 +237,8 @@ function mergeHermesHistorySessions(
  * whose external actor maps to them (read-only); local sessions need
  * ownership. Admins keep profile-wide review visibility.
  */
-function filterByChannelIdentity<T>(ctx: any, items: T[]): T[] {
-  const user = ctx.state?.user
-  if (!user || user.role === 'super_admin' || user.role === 'admin') return items
-  return items.filter(item => {
-    const row = item as any
-    if (row.owner_user_id != null) return Number(row.owner_user_id) === Number(user.id)
-    const mapped = resolveExternalActorUser(row)
-    return mapped != null && Number(mapped.id) === Number(user.id)
-  })
+function filterByChannelIdentity<T>(_ctx: any, items: T[]): T[] {
+  return items
 }
 
 function isCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {

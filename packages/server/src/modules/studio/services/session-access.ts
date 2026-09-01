@@ -82,20 +82,17 @@ export function externalActorOf(
   return null
 }
 
+/**
+ * Session authorization is Profile-scoped. Callers must verify that the user
+ * can access the Session's Profile before consulting this helper. Ownership
+ * fields remain audit metadata and do not restrict collaboration within a
+ * Profile.
+ */
 export function resolveSessionAccess(
   user: SessionAccessUser | null | undefined,
   session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
 ): SessionAccess {
-  if (!session) return 'none'
-  if (user && session.owner_user_id != null && Number(session.owner_user_id) === Number(user.id)) {
-    return 'full'
-  }
-  if (user?.role === 'super_admin') return 'full'
-  if (user?.role === 'admin') return 'read_external'
-  // Plain 'user': read-only access to channel history mapped to them.
-  const mapped = resolveExternalActorUser(session)
-  if (mapped && Number(mapped.id) === Number(user?.id)) return 'read_external'
-  return 'none'
+  return user && session ? 'full' : 'none'
 }
 
 export function canReadSession(user: SessionAccessUser | null | undefined, session: SessionOwnershipFields | null | undefined): boolean {
