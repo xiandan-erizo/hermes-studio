@@ -95,6 +95,7 @@ const router = useRouter();
 const message = useMessage();
 const { t } = useI18n();
 const isSuperAdmin = computed(() => isStoredSuperAdmin());
+const canSelectNewChatWorkspace = computed(() => isSuperAdmin.value);
 
 const showOutline = ref(false);
 const showRealtimeVoice = ref(false);
@@ -838,6 +839,13 @@ function initWorkspaceComposable(profile: string) {
   recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
 }
 
+function clearNewChatWorkspaceSelection() {
+  workspaceComposable = null;
+  defaultWorkspaces.value = [];
+  recentWorkspaces.value = [];
+  newChatWorkspace.value = "";
+}
+
 function handleToggleDefaultWorkspace() {
   if (!workspaceComposable) return;
   const currentPath = newChatWorkspace.value;
@@ -1140,8 +1148,10 @@ watch(
   () => {
     ensureNewChatProviderSelection();
     // Reload workspace data when profile changes
-    if (newChatProfile.value) {
+    if (canSelectNewChatWorkspace.value && newChatProfile.value) {
       initWorkspaceComposable(newChatProfile.value);
+    } else {
+      clearNewChatWorkspaceSelection();
     }
   },
 );
@@ -1165,14 +1175,18 @@ async function openNewChatModal() {
       profilesStore.profiles[0]?.name ||
       "default";
     
-    // Initialize workspace composable and load defaults
-    initWorkspaceComposable(newChatProfile.value);
-    
-    // Auto-fill most recent default workspace if available
-    if (mostRecentDefaultWorkspace.value) {
-      newChatWorkspace.value = mostRecentDefaultWorkspace.value;
+    if (canSelectNewChatWorkspace.value) {
+      // Initialize workspace composable and load defaults
+      initWorkspaceComposable(newChatProfile.value);
+
+      // Auto-fill most recent default workspace if available
+      if (mostRecentDefaultWorkspace.value) {
+        newChatWorkspace.value = mostRecentDefaultWorkspace.value;
+      } else {
+        newChatWorkspace.value = "";
+      }
     } else {
-      newChatWorkspace.value = "";
+      clearNewChatWorkspaceSelection();
     }
     
     syncNewChatModelSelection();
@@ -2654,7 +2668,7 @@ async function handleSessionModelCustomSubmit() {
               :placeholder="t('models.apiKeyPlaceholder')"
             />
           </label>
-          <div class="new-chat-field">
+          <div v-if="canSelectNewChatWorkspace" class="new-chat-field">
             <span class="new-chat-label">
               {{ t("chat.workspace") }}
               <NTooltip v-if="isCurrentWorkspaceDefault">

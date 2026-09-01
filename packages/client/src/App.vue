@@ -25,6 +25,7 @@ import AuthEventListener from "@/components/auth/AuthEventListener.vue";
 import { desktopBridge } from "@/utils/desktop-bridge";
 import { naiveLocaleFor } from "@/constants/naiveLocale";
 import { naiveRtlFor } from "@/constants/naiveRtl";
+import { isStoredSuperAdmin, isStoredUser } from "@/api/client";
 
 const AppSidebar = defineAsyncComponent(
   async () => (await import("@/components/layout/AppSidebar.vue")).default,
@@ -159,6 +160,7 @@ const isDesktopPetRoute = computed(() => route.name === "desktop.pet");
 const showWebPet = computed(
   () =>
     !isLoginPage.value &&
+    !isStoredUser() &&
     !isStandaloneChatPage.value &&
     !isDesktopShell.value &&
     !isDesktopPetRoute.value,
@@ -193,7 +195,7 @@ watch(
 );
 
 onMounted(() => {
-  if (!isInviteOnlyPage.value) {
+  if (!isInviteOnlyPage.value && !isStoredUser()) {
     void syncThemeFromServer().catch(() => undefined);
   }
   const bridge = desktopBridge();
@@ -319,7 +321,7 @@ useKeyboard();
             v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage"
           />
           <RuntimeRestartPrompt
-            v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage"
+            v-if="!isLoginPage && !isDesktopPetRoute && !isStandaloneChatPage && isStoredSuperAdmin()"
           />
         </NNotificationProvider>
       </NDialogProvider>

@@ -89,6 +89,15 @@ describe('ChatPanel session clicks', () => {
     expect(source).toContain('selectedGroup?.models.includes(selectedModel)')
   })
 
+  it('uses the profile workspace default instead of exposing workspace selection to non-super-admins', () => {
+    const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
+
+    expect(source).toContain('const canSelectNewChatWorkspace = computed(() => isSuperAdmin.value)')
+    expect(source).toContain('<div v-if="canSelectNewChatWorkspace" class="new-chat-field">')
+    expect(source).toContain('workspaceComposable = null')
+    expect(source).toContain('newChatWorkspace.value = ""')
+  })
+
   it('offers Ekko when creating chats in production builds', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 

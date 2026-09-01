@@ -17,6 +17,15 @@ const appStoreMock = vi.hoisted(() => ({
   startHealthPolling: vi.fn(),
   stopHealthPolling: vi.fn(),
 }))
+const authMock = vi.hoisted(() => ({
+  isStoredSuperAdmin: vi.fn(() => true),
+  isStoredUser: vi.fn(() => false),
+}))
+const themeMock = vi.hoisted(() => ({
+  syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock('@/api/client', () => authMock)
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
@@ -39,7 +48,7 @@ vi.mock('@/composables/useTheme', () => ({
     isComic: false,
     customization: { value: { fontSize: 14, textColor: null, accentColor: null } },
     hasBackgroundImage: false,
-    syncThemeFromServer: vi.fn().mockResolvedValue(undefined),
+    syncThemeFromServer: themeMock.syncThemeFromServer,
   }),
 }))
 
@@ -128,6 +137,8 @@ function mountApp() {
 describe('App web pet mounting', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    authMock.isStoredSuperAdmin.mockReturnValue(true)
+    authMock.isStoredUser.mockReturnValue(false)
     routeMock.name = 'hermes.chat'
     routeMock.meta = {}
     appStoreMock.sidebarCollapsed = false
@@ -141,6 +152,24 @@ describe('App web pet mounting', () => {
 
     expect(wrapper.findComponent({ name: 'GlobalPendingActions' }).exists()).toBe(true)
     expect(wrapper.findComponent({ name: 'RuntimeRestartPrompt' }).exists()).toBe(true)
+  })
+
+  it('does not mount runtime restart polling for non-super-admin users', async () => {
+    authMock.isStoredSuperAdmin.mockReturnValue(false)
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'RuntimeRestartPrompt' }).exists()).toBe(false)
+  })
+
+  it('does not load theme or pets for plain users', async () => {
+    authMock.isStoredSuperAdmin.mockReturnValue(false)
+    authMock.isStoredUser.mockReturnValue(true)
+    const wrapper = mountApp()
+    await flushPromises()
+
+    expect(themeMock.syncThemeFromServer).not.toHaveBeenCalled()
+    expect(wrapper.findComponent({ name: 'WebPet' }).exists()).toBe(false)
   })
 
   it('mounts the web pet in the browser web app', async () => {
