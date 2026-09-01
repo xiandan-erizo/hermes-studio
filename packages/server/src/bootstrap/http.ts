@@ -64,10 +64,16 @@ import {
   restorePersistedPiProxyTargets,
 } from './coding-agents'
 import { isAuthorizedCodexProxyRequest } from '../modules/coding-agents/services/codex/proxy'
-import { configurePreferredHermesRuntime } from '../modules/hermes/services/runtime/selection'
-import { configureRuntimeInstallCompletedHandler, getRuntimeVersionStatus } from '../modules/hermes/services/runtime/version-manager'
+import {
+  configurePreferredHermesRuntime,
+  readLockedDesktopHermesSelection,
+  type HermesRuntimeSelection,
+} from '../modules/hermes/services/runtime/selection'
+import {
+  getRuntimeVersionStatus,
+  readActiveVersionManifest,
+} from '../modules/hermes/services/runtime/version-manager'
 import { isHermesAgentAvailable, updateAgentStatus } from '../modules/studio/public/agent-status-registry'
-import { scheduleWebUiRestart } from '../modules/studio/public/web-ui-restart'
 
 // Injected by esbuild at build time; fallback to reading package.json in dev mode
 declare const __APP_VERSION__: string
@@ -320,6 +326,44 @@ function startLanDiscovery(): void {
   }
 }
 
+function recordLockedHermesSelection(selection: HermesRuntimeSelection): void {
+  if (selection.source === 'none' || !selection.path) {
+    const activationError = readActiveVersionManifest()?.runtimeActivationError || ''
+    updateAgentStatus('hermes', {
+      name: 'Hermes',
+      provider: 'Nous Research',
+      kind: 'hermes',
+      installed: false,
+      version: '',
+      source: 'not-installed',
+      path: '',
+      error: activationError,
+      installations: [],
+    })
+    return
+  }
+
+  updateAgentStatus('hermes', {
+    name: 'Hermes',
+    provider: 'Nous Research',
+    kind: 'hermes',
+    installed: true,
+    version: selection.version,
+    source: selection.source,
+    path: selection.path,
+    error: '',
+    installations: [{
+      path: selection.path,
+      version: selection.version,
+      source: selection.source,
+      selected: true,
+      ...(selection.managedRuntimeVersion
+        ? { managedRuntimeVersion: selection.managedRuntimeVersion }
+        : {}),
+    }],
+  })
+}
+
 export async function bootstrap() {
   bootstrapReady = false
   console.log(`hermes-web-ui v${APP_VERSION} starting...`)
@@ -328,16 +372,21 @@ export async function bootstrap() {
     await ensureStartupDirectory(config.dataDir, 'development data')
   }
 
-  let hermesSelection = { source: 'none', version: '', path: '' }
-  try {
-    hermesSelection = await configurePreferredHermesRuntime()
-  } catch (error) {
-    logger.warn(error, '[bootstrap] failed to inspect Hermes Runtime; continuing without a selected runtime')
+  const lockedDesktopSelection = readLockedDesktopHermesSelection()
+  let hermesSelection: HermesRuntimeSelection = lockedDesktopSelection
+    || { source: 'none', version: '', path: '' }
+  if (!lockedDesktopSelection) {
+    try {
+      hermesSelection = await configurePreferredHermesRuntime()
+    } catch (error) {
+      logger.warn(error, '[bootstrap] failed to inspect Hermes Runtime; continuing without a selected runtime')
+    }
   }
-  console.log(`[bootstrap] Hermes source=${hermesSelection.source} version=${hermesSelection.version || '-'} path=${hermesSelection.path || '-'}`)
+  console.log(`[bootstrap] Hermes source=${hermesSelection.source} version=${hermesSelection.version || '-'} path=${hermesSelection.path || '-'} python=${hermesSelection.pythonPath || '-'} root=${hermesSelection.agentRoot || '-'}`)
+  if (lockedDesktopSelection) recordLockedHermesSelection(hermesSelection)
   updateAgentStatus('ekko-agent', { version: APP_VERSION })
   const inventoryResults = await Promise.allSettled([
-    getRuntimeVersionStatus({ includeRemote: false }),
+    ...(!lockedDesktopSelection ? [getRuntimeVersionStatus({ includeRemote: false })] : []),
     getCodingAgentsStatus(),
   ])
   for (const result of inventoryResults) {
@@ -347,16 +396,6 @@ export async function bootstrap() {
   }
   const hermesAgentAvailable = isHermesAgentAvailable()
   console.log(`[bootstrap] Hermes Agent inventory status=${hermesAgentAvailable ? 'available' : 'not-installed'}`)
-  configureRuntimeInstallCompletedHandler(() => {
-    if (isDesktopRuntime()) {
-      setTimeout(() => {
-        void getShutdownHandler()('runtime-installed', 75)
-      }, 250).unref?.()
-      return
-    }
-    scheduleWebUiRestart()
-  })
-
   await initLoginLimiter()
   if (skillInjectionDisabled()) {
     console.log('[bootstrap] bundled skill injection disabled by HERMES_WEB_UI_DISABLE_SKILL_INJECTION')
