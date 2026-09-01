@@ -385,59 +385,6 @@ const USER_READABLE_API_PATHS: Array<{ method: string; path: string }> = [
   { method: 'GET', path: '/api/hermes/config' },
 ]
 
-/**
- * API surface required by the plain-user chat and history pages. Keep this
- * allowlist explicit so adding a new user-zone route does not silently expose
- * it to accounts that are meant to be chat-only.
- */
-const PLAIN_USER_API_RULES: Array<{ method: string; path: string; prefix?: boolean }> = [
-  { method: 'GET', path: '/api/auth/me' },
-  { method: 'GET', path: '/api/app/profiles' },
-  { method: 'GET', path: '/api/hermes/profiles' },
-  { method: 'GET', path: '/api/hermes/available-models' },
-  { method: 'GET', path: '/api/hermes/config' },
-  { method: 'GET', path: '/api/agents/availability' },
-  { method: 'GET', path: '/api/social-messages/platforms' },
-  { method: 'GET', path: '/api/hermes/skills' },
-  { method: '*', path: '/api/hermes/bundles', prefix: true },
-  { method: '*', path: '/api/hermes/model-context', prefix: true },
-  { method: '*', path: '/api/studio/sessions', prefix: true },
-  { method: '*', path: '/api/studio/session-categories', prefix: true },
-  { method: 'GET', path: '/api/studio/search/sessions' },
-  { method: '*', path: '/api/studio/chat-run', prefix: true },
-  { method: 'POST', path: '/api/studio/uploads' },
-  { method: '*', path: '/api/studio/files', prefix: true },
-  { method: '*', path: '/api/studio/stt', prefix: true },
-  { method: '*', path: '/api/studio/tts', prefix: true },
-]
-
-export function isPlainUserApiPathAllowed(method: string, path: string): boolean {
-  const normalizedMethod = String(method || '').toUpperCase()
-  const normalizedPath = String(path || '').split('?', 1)[0].replace(/\/$/, '') || '/'
-  return PLAIN_USER_API_RULES.some(rule => (
-    (rule.method === '*' || rule.method === normalizedMethod)
-    && (normalizedPath === rule.path || (rule.prefix === true && normalizedPath.startsWith(`${rule.path}/`)))
-  ))
-}
-
-/**
- * Restrict plain user accounts to the APIs that power chat and history. This
- * runs before protected route modules, because many user-zone routers are
- * mounted before the broader administrator gate.
- */
-export async function requirePlainUserSurface(ctx: Context, next: Next): Promise<void> {
-  if (ctx.state.user?.role !== 'user' || !isProtectedHttpPath(ctx.path)) {
-    await next()
-    return
-  }
-  if (!isPlainUserApiPathAllowed(ctx.method, ctx.path)) {
-    ctx.status = 403
-    ctx.body = { error: 'This account is limited to chat and history' }
-    return
-  }
-  await next()
-}
-
 function isUserReadablePath(ctx: Context): boolean {
   const method = typeof ctx.method === 'string' ? ctx.method.toUpperCase() : ''
   return USER_READABLE_API_PATHS.some(entry =>

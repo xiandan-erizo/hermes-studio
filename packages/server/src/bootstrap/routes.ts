@@ -23,7 +23,7 @@ import {
 import { uploadRoutes } from '../modules/studio/routes/upload'
 import { appUploadRoutes } from '../modules/studio/routes/app-upload'
 import { authPublicRoutes, authProtectedRoutes } from '../modules/studio/routes/auth'
-import { requireElevatedApi, requirePlainUserSurface } from '../modules/studio/public/auth'
+import { requireElevatedApi } from '../modules/studio/public/auth'
 import { mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
 
 import { sessionRoutes } from '../modules/studio/routes/sessions'
@@ -94,13 +94,9 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   // --- Auth middleware: all routes below require authentication ---
   authMiddleware.forEach((middleware) => app.use(middleware))
 
-  // Plain users only have the chat/history surface. This must run before the
-  // user-zone routers below so matched routes cannot bypass the restriction.
-  app.use(requirePlainUserSurface)
-
   // --- Protected routes (auth required) ---
-  // Chat/history and profile-scoped routes: available to every authenticated
-  // user. Plain 'user' accounts are filtered to this surface above.
+  // Chat and profile-scoped routes: available to every authenticated user
+  // (super_admin, admin, and plain 'user' accounts invited via profile links).
   app.use(authProtectedRoutes.routes())
   app.use(uploadRoutes.routes())
   app.use(appUploadRoutes.routes())
