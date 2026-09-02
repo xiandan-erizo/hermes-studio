@@ -3,9 +3,11 @@ import {
   createFileProvider,
   localProvider,
   isInUploadDir,
+  isSensitivePath,
   validatePath,
   resolveProfileFilePath,
 } from '../services/files/file-provider'
+import { isInProfileUploadDir } from '../services/files/upload-paths'
 import { getActiveProfileName } from '../public/profile-config'
 import { createAppImagePreview } from '../services/files/app-image-preview'
 
@@ -78,15 +80,22 @@ export async function download(ctx: any) {
 
   try {
     const profile = requestedProfile(ctx)
-    // Absolute paths may point anywhere on the Studio host, so only the
-    // super administrator may use them. Other users stay inside their
-    // request-scoped Profile through resolveProfileFilePath().
-    if (isAbsolute(filePath) && ctx.state?.user?.role !== 'super_admin') {
+    const superAdmin = ctx.state?.user?.role === 'super_admin'
+    if (!superAdmin && isSensitivePath(filePath)) {
       ctx.status = 403
-      ctx.body = { error: 'Absolute file paths require super administrator privileges', code: 'permission_denied' }
+      ctx.body = { error: 'Sensitive files cannot be downloaded', code: 'permission_denied' }
       return
     }
-    const validPath = isAbsolute(filePath) ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
+
+    const absolutePath = isAbsolute(filePath)
+    const validPath = absolutePath ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
+    // Chat uploads are stored as absolute paths under a Profile-specific upload
+    // directory. Preserve those links without reopening arbitrary host reads.
+    if (!superAdmin && absolutePath && !isInProfileUploadDir(validPath, profile)) {
+      ctx.status = 403
+      ctx.body = { error: 'Absolute file path is outside the current Profile upload directory', code: 'permission_denied' }
+      return
+    }
 
     // Choose provider: always use local for upload directory files
     let data: Buffer
