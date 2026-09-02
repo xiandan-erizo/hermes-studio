@@ -1,26 +1,13 @@
 /**
- * Unified session authorization (P0).
+ * Unified Session authorization.
  *
- * Single source of truth for who may read / operate a Studio session.
- * Authorization is based on `owner_user_id` (see session-ownership.ts) --
- * the legacy mixed-semantics `user_id` column is NEVER consulted here.
+ * Profile access is checked by the HTTP/Socket caller first. Within an allowed
+ * Profile, a Session is private to its creator; only super_admin may access
+ * every user's Session. External channel history remains read-only when its
+ * actor identity is mapped to the current Studio user.
  *
- * Access matrix (phase 1):
- *
- *   subject                          read   operate
- *   -------------------------------  -----  -------
- *   owner_user_id === user.id         yes    yes
- *   super_admin                       yes    yes   (explicit management capability)
- *   admin (profile history review)   yes     no
- *   plain 'user', external identity
- *   reliably mapped                  (reserved: readExternalHistory)
- *   anything else                      no     no
- *
- * `readExternalHistory` is intentionally a reserved capability: personal
- * channel history (feishu/dingtalk) will surface through a future read-only
- * view driven by external_actor_* mapping, not by granting owners. Keep this
- * hook so repository queries can ask for it without hardcoding "owner-less
- * sessions are invisible" everywhere.
+ * `owner_user_id` is the authorization field. The legacy mixed-semantics
+ * `user_id` is used only to resolve an external channel actor.
  */
 
 /** Fields carried by Hermes state.db history rows (channel sessions). */
@@ -82,17 +69,16 @@ export function externalActorOf(
   return null
 }
 
-/**
- * Session authorization is Profile-scoped. Callers must verify that the user
- * can access the Session's Profile before consulting this helper. Ownership
- * fields remain audit metadata and do not restrict collaboration within a
- * Profile.
- */
 export function resolveSessionAccess(
   user: SessionAccessUser | null | undefined,
   session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
 ): SessionAccess {
-  return user && session ? 'full' : 'none'
+  if (!user || !session) return 'none'
+  if (user.role === 'super_admin') return 'full'
+  if (session.owner_user_id != null && Number(session.owner_user_id) === Number(user.id)) return 'full'
+  const mapped = resolveExternalActorUser(session)
+  if (mapped && Number(mapped.id) === Number(user.id)) return 'read_external'
+  return 'none'
 }
 
 export function canReadSession(user: SessionAccessUser | null | undefined, session: SessionOwnershipFields | null | undefined): boolean {

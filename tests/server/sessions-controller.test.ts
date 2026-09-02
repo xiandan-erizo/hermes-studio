@@ -865,11 +865,12 @@ describe('session conversations controller', () => {
     expect(ctx.body).toEqual({ error: 'Session not found' })
   })
 
-  it('lists all account-accessible single-chat sessions when only the active profile header is present', async () => {
+  it('lists only admin-owned sessions across accessible profiles when only the active profile header is present', async () => {
     listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }, { profile_name: 'travel' }])
     localListSessionsMock.mockReturnValue([
       {
         id: 'default-session',
+        owner_user_id: 1,
         profile: 'default',
         source: 'cli',
         model: 'gpt-5',
@@ -892,6 +893,7 @@ describe('session conversations controller', () => {
       },
       {
         id: 'travel-session',
+        owner_user_id: 1,
         profile: 'travel',
         source: 'cli',
         model: 'gpt-5',
@@ -913,7 +915,31 @@ describe('session conversations controller', () => {
         preview: '',
       },
       {
+        id: 'other-user-session',
+        owner_user_id: 2,
+        profile: 'default',
+        source: 'cli',
+        model: 'gpt-5',
+        title: 'Other user',
+        started_at: 3,
+        ended_at: null,
+        last_active: 5,
+        message_count: 1,
+        tool_call_count: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 0,
+        billing_provider: null,
+        estimated_cost_usd: 0,
+        actual_cost_usd: null,
+        cost_status: '',
+        preview: '',
+      },
+      {
         id: 'secret-session',
+        owner_user_id: 1,
         profile: 'secret',
         source: 'cli',
         model: 'gpt-5',
@@ -1045,13 +1071,13 @@ describe('session conversations controller', () => {
   it('counts visible single-chat sessions with the same filters as the list endpoint', async () => {
     listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }, { profile_name: 'travel' }])
     localListSessionsMock.mockReturnValue([
-      { id: 'default-session', profile: 'default', source: 'cli' },
-      { id: 'travel-session', profile: 'travel', source: 'coding_agent' },
-      { id: 'archived-session', profile: 'default', source: 'cli', is_archived: 1 },
-      { id: 'secret-session', profile: 'secret', source: 'cli' },
-      { id: 'unknown-profile-session', profile: 'missing', source: 'cli' },
-      { id: 'api-session', profile: 'default', source: 'api_server' },
-      { id: 'workflow-session', profile: 'default', source: 'workflow' },
+      { id: 'default-session', profile: 'default', source: 'cli', owner_user_id: 1 },
+      { id: 'travel-session', profile: 'travel', source: 'coding_agent', owner_user_id: 1 },
+      { id: 'archived-session', profile: 'default', source: 'cli', is_archived: 1, owner_user_id: 1 },
+      { id: 'secret-session', profile: 'secret', source: 'cli', owner_user_id: 1 },
+      { id: 'unknown-profile-session', profile: 'missing', source: 'cli', owner_user_id: 1 },
+      { id: 'api-session', profile: 'default', source: 'api_server', owner_user_id: 1 },
+      { id: 'workflow-session', profile: 'default', source: 'workflow', owner_user_id: 1 },
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
@@ -1470,16 +1496,17 @@ describe('session conversations controller', () => {
     expect(ctx.body).toEqual({ error: 'Session not found' })
   })
 
-  it('searches all account-accessible single-chat sessions unless profile is explicit', async () => {
+  it('searches only admin-owned single-chat sessions unless profile is explicit', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }, { profile_name: 'travel' }])
     localSearchSessionsMock.mockReturnValue([
-      { id: 'global-1', profile: 'default', source: 'global_agent' },
-      { id: 'chat-1', profile: 'default', source: 'cli' },
+      { id: 'global-1', profile: 'default', source: 'global_agent', owner_user_id: 1 },
+      { id: 'chat-1', profile: 'default', source: 'cli', owner_user_id: 2 },
     ])
 
     const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
     const ctx: any = {
       query: { q: 'docker', limit: '10' },
-      state: { profile: { name: 'travel' } },
+      state: { user: { id: 1, role: 'admin' }, profile: { name: 'travel' } },
       body: null,
     }
     await mod.search(ctx)
@@ -1492,7 +1519,6 @@ describe('session conversations controller', () => {
     })
     expect(ctx.body.results).toEqual([
       expect.objectContaining({ id: 'global-1', source: 'global_agent' }),
-      expect.objectContaining({ id: 'chat-1', source: 'cli' }),
     ])
   })
 

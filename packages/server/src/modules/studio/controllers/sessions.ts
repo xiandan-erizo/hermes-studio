@@ -53,7 +53,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, externalActorOf } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -131,13 +131,15 @@ function filterByAllowedProfiles<T>(ctx: any, items: T[]): T[] {
   return items.filter(item => allowed.has(((item as any).profile as string | null | undefined) || 'default'))
 }
 
-/**
- * List-level ownership filter (P0): plain 'user' accounts only see sessions
- * they own. Admins keep profile-wide visibility (read-only history review);
- * the per-session operate gate stays enforced by denySessionAccess.
- */
-function filterBySessionOwnership<T>(_ctx: any, items: T[]): T[] {
-  return items
+/** List-level ownership filter: only super_admin may see every Session. */
+function filterBySessionOwnership<T>(ctx: any, items: T[]): T[] {
+  const user = ctx.state?.user
+  if (user?.role === 'super_admin') return items
+  if (!user) return []
+  return items.filter(item => {
+    const ownerId = (item as any).owner_user_id
+    return ownerId != null && Number(ownerId) === Number(user.id)
+  })
 }
 
 /**
@@ -218,6 +220,9 @@ function mergeHermesHistorySessions(
     const localSession = localSessionsById.get(id)
     if (localSession?.is_archived != null) session.is_archived = localSession.is_archived
     session.push_enabled = Number(localSession?.push_enabled || 0) !== 0 ? 1 : 0
+    if (localSession?.owner_user_id != null) session.owner_user_id = localSession.owner_user_id
+    if (localSession?.external_actor_source) session.external_actor_source = localSession.external_actor_source
+    if (localSession?.external_actor_id) session.external_actor_id = localSession.external_actor_id
   }
 
   for (const session of localSessions) {
@@ -233,12 +238,19 @@ function mergeHermesHistorySessions(
 }
 
 /**
- * Channel-history visibility for plain users (P0): they see only sessions
- * whose external actor maps to them (read-only); local sessions need
- * ownership. Admins keep profile-wide review visibility.
+ * Channel history follows the same creator boundary. A mapped external actor
+ * may see its own channel history read-only; only super_admin sees all rows.
  */
-function filterByChannelIdentity<T>(_ctx: any, items: T[]): T[] {
-  return items
+function filterByChannelIdentity<T>(ctx: any, items: T[]): T[] {
+  const user = ctx.state?.user
+  if (user?.role === 'super_admin') return items
+  if (!user) return []
+  return items.filter(item => {
+    const row = item as any
+    if (row.owner_user_id != null) return Number(row.owner_user_id) === Number(user.id)
+    const mapped = resolveExternalActorUser(row)
+    return mapped != null && Number(mapped.id) === Number(user.id)
+  })
 }
 
 function isCodingAgentSession(session?: { source?: string | null; agent?: string | null; agent_session_id?: string | null } | null): boolean {
@@ -429,7 +441,8 @@ export async function listConversations(ctx: any) {
 
   const profile = explicitProfileFilter(ctx)
   const sessions = localListSessions(profile, source, limit && limit > 0 ? limit : 200)
-  const summaries: ConversationSummary[] = sessions.map(s => ({
+  const visibleSessions = filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, sessions))
+  const summaries: ConversationSummary[] = visibleSessions.map(s => ({
     id: s.id,
     profile: s.profile || null,
     source: s.source,
@@ -461,7 +474,7 @@ export async function listConversations(ctx: any) {
     is_active: s.ended_at == null && (Date.now() / 1000 - s.last_active) <= 300,
     thread_session_count: 1,
   }))
-  ctx.body = { sessions: filterPendingDeletedConversationSummaries(filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, summaries))) }
+  ctx.body = { sessions: filterPendingDeletedConversationSummaries(summaries) }
 }
 
 export async function getConversationMessages(ctx: any) {
@@ -594,7 +607,7 @@ export async function count(ctx: any) {
   const profile = explicitProfileFilter(ctx)
   const allSessions = localListSessions(profile, source, 2147483647)
   const knownProfiles = profile ? null : new Set(listProfileNamesFromDisk())
-  const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterByAllowedProfiles(ctx, allSessions).filter(s =>
+  const sessions = filterPendingDeletedSessions(filterArchivedSessions(filterBySessionOwnership(ctx, filterByAllowedProfiles(ctx, allSessions)).filter(s =>
     isRequestedSessionSource(source, s.source) &&
     (!knownProfiles || knownProfiles.has(s.profile || 'default')),
   )))

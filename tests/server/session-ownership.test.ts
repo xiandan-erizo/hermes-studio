@@ -93,40 +93,44 @@ describe('SessionAccessService matrix (P0)', () => {
   const admin = { id: 12, role: 'admin' }
   const superAdmin = { id: 13, role: 'super_admin' }
 
-  it('grants full access to every authenticated user after the Profile gate', async () => {
+  it('grants full access only to the owner and super_admin', async () => {
     const { resolveSessionAccess } = await load()
     const session = { owner_user_id: 10 }
     expect(resolveSessionAccess(owner, session)).toBe('full')
     expect(resolveSessionAccess(superAdmin, session)).toBe('full')
-    expect(resolveSessionAccess(admin, session)).toBe('full')
-    expect(resolveSessionAccess(otherUser, session)).toBe('full')
+    expect(resolveSessionAccess(admin, session)).toBe('none')
+    expect(resolveSessionAccess(otherUser, session)).toBe('none')
     expect(resolveSessionAccess(null, session)).toBe('none')
   })
 
-  it('treats owner-less sessions as shared Profile resources', async () => {
+  it('keeps owner-less sessions private unless an external identity maps to the user', async () => {
     const { resolveSessionAccess } = await load()
     const legacy = { owner_user_id: null, ownership_state: 'unresolved' }
-    expect(resolveSessionAccess(admin, legacy)).toBe('full')
-    expect(resolveSessionAccess(owner, legacy)).toBe('full')
+    expect(resolveSessionAccess(admin, legacy)).toBe('none')
+    expect(resolveSessionAccess(owner, legacy)).toBe('none')
     expect(resolveSessionAccess(superAdmin, legacy)).toBe('full')
   })
 
-  it('read and operate gates allow authenticated Profile members', async () => {
+  it('read and operate gates hide another users Session', async () => {
     const { denySessionRead, denySessionOperation } = await load()
     const member = { state: { user: otherUser } } as any
-    expect(denySessionRead(member, { owner_user_id: 10 })).toBe(false)
-    expect(denySessionOperation(member, { owner_user_id: 10 })).toBe(false)
+    expect(denySessionRead(member, { owner_user_id: 10 })).toBe(true)
+    expect(member.status).toBe(404)
 
-    const anonymous = { state: {} } as any
-    expect(denySessionRead(anonymous, { owner_user_id: 10 })).toBe(true)
-    expect(anonymous.status).toBe(404)
+    const operation = { state: { user: otherUser } } as any
+    expect(denySessionOperation(operation, { owner_user_id: 10 })).toBe(true)
+    expect(operation.status).toBe(404)
+
+    const ownerCtx = { state: { user: owner } } as any
+    expect(denySessionOperation(ownerCtx, { owner_user_id: 10 })).toBe(false)
   })
 
-  it('keeps ownership fields as audit metadata only', async () => {
+  it('never treats the legacy user_id as local Session ownership', async () => {
     const { resolveSessionAccess } = await load()
-    const session = { owner_user_id: 99, user_id: '11' } as any
-    expect(resolveSessionAccess(otherUser, session)).toBe('full')
+    const session = { owner_user_id: 99, user_id: '11', source: 'cli' } as any
+    expect(resolveSessionAccess(otherUser, session)).toBe('none')
   })
+
 })
 
 describe('session-store ownership writes (P0)', () => {
