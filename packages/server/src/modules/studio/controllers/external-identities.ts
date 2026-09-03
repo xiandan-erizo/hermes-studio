@@ -1,5 +1,5 @@
 import type { Context } from 'koa'
-import { findUserById } from '../public/users'
+import { findUserById, listUsers } from '../public/users'
 import {
   createExternalIdentity,
   deleteExternalIdentity,
@@ -89,6 +89,19 @@ export async function createMapping(ctx: Context) {
   }
   ctx.status = 201
   ctx.body = { mapping: { ...result, username: findUserById(userId)?.username || null } }
+}
+
+/**
+ * GET /api/auth/external-identities/users (admin)
+ * Minimal account list for the mapping picker: admins may manage channel
+ * mappings without access to full user management.
+ */
+export async function listMappingUsers(ctx: Context) {
+  ctx.body = {
+    users: listUsers()
+      .filter(user => user.status === 'active')
+      .map(user => ({ id: user.id, username: user.username })),
+  }
 }
 
 /**

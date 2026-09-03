@@ -34,6 +34,7 @@ authProtectedRoutes.get('/api/auth/external-identities', requireAdmin, externalI
 authProtectedRoutes.get('/api/auth/external-identities/candidates', requireAdmin, externalIdentityCtrl.listCandidates)
 authProtectedRoutes.post('/api/auth/external-identities', requireAdmin, externalIdentityCtrl.createMapping)
 authProtectedRoutes.delete('/api/auth/external-identities/:id', requireAdmin, externalIdentityCtrl.removeMapping)
+authProtectedRoutes.get('/api/auth/external-identities/users', requireAdmin, externalIdentityCtrl.listMappingUsers)
 authProtectedRoutes.get('/api/auth/invites', requireAdmin, inviteCtrl.listInviteRecords)
 authProtectedRoutes.post('/api/auth/invites', requireAdmin, inviteCtrl.createInviteRecord)
 authProtectedRoutes.delete('/api/auth/invites/:code', requireAdmin, inviteCtrl.revokeInviteRecord)

@@ -5,6 +5,7 @@ import {
   getHermesSessionDetail,
   getHermesSessionDetailForProfile,
   getHermesSessionDetailPaginatedForProfile,
+  getHermesAncestorSessionRows,
   getExactHermesSessionDetailForProfile,
   getHermesUsageStats,
   listHermesSessionSummaries,
@@ -53,7 +54,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -231,7 +232,7 @@ function mergeHermesHistorySessions(
     historySessionsById.set(session.id, { ...session, webui_imported: true })
   }
 
-  return filterPendingDeletedSessions(filterByChannelIdentity(ctx, filterByAllowedProfiles(ctx, [...historySessionsById.values()]).filter(session =>
+  return filterPendingDeletedSessions(filterByChannelIdentity(ctx, inheritSessionIdentities(filterByAllowedProfiles(ctx, [...historySessionsById.values()])).filter(session =>
     (!source || session.source === source) &&
     (isHermesHistorySessionSource(session.source) || (isArchivedSession(session) && session.source !== 'global_agent')),
   )))
@@ -1146,6 +1147,35 @@ export async function getContext(ctx: any) {
  * Get Hermes History session detail, including Web UI/API Server sessions.
  * GET /api/studio/sessions/hermes/:id
  */
+/**
+ * Subagent rows carry no identity of their own; they inherit visibility from
+ * the nearest ancestor that has one (local owner or mapped channel actor).
+ */
+async function enrichWithAncestorIdentity(session: any, profile?: string | null): Promise<any> {
+  if (!session || session.owner_user_id != null || externalActorOf(session)) return session
+  if (!session.parent_session_id) return session
+  let ancestors: any[] = []
+  try {
+    ancestors = await getHermesAncestorSessionRows(String(session.id), profile || undefined)
+  } catch {
+    return session
+  }
+  for (const ancestor of ancestors) {
+    let local: any = null
+    try { local = localGetSession(ancestor.id) } catch { local = null }
+    const actor = externalActorOf(local) || externalActorOf(ancestor)
+    if (local?.owner_user_id == null && !actor) continue
+    const next: any = { ...session }
+    if (next.owner_user_id == null && local?.owner_user_id != null) next.owner_user_id = local.owner_user_id
+    if (!next.external_actor_source && actor) {
+      next.external_actor_source = actor.source
+      next.external_actor_id = actor.externalId
+    }
+    return next
+  }
+  return session
+}
+
 export async function getHermesSession(ctx: any) {
   const profile = requestedProfile(ctx)
 
@@ -1180,8 +1210,9 @@ export async function getHermesSession(ctx: any) {
         ...(profile ? { profile } : {}),
         push_enabled: Number(matchingLocalSession?.push_enabled || 0) !== 0 ? 1 : 0,
       }
-      if (denySessionAccess(ctx, sessionWithProfile)) return
-      ctx.body = { session: sessionWithProfile }
+      const enrichedSession = await enrichWithAncestorIdentity(sessionWithProfile, profile || undefined)
+      if (denySessionAccess(ctx, enrichedSession)) return
+      ctx.body = { session: enrichedSession }
       return
     }
   } catch (err) {
@@ -2152,7 +2183,8 @@ export async function getConversationMessagesPaginated(ctx: any) {
     return
   }
   const session = { ...result.session, profile: (result.session as any).profile || profile || 'default' }
-  if (denySessionAccess(ctx, session)) return
+  const gateSession = await enrichWithAncestorIdentity(session, profile || 'default')
+  if (denySessionAccess(ctx, gateSession)) return
   const assistantMessageIds = result.messages
     .filter((message: any) => String(message.display_role || message.role || '') === 'assistant')
     .map((message: any) => message.id)

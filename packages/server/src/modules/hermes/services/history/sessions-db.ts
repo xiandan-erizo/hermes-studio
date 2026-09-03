@@ -17,6 +17,7 @@ export interface HermesSessionRow {
   id: string
   source: string
   user_id: string | null
+  parent_session_id?: string | null
   model: string
   title: string | null
   started_at: number
@@ -418,7 +419,7 @@ function compareSessionSummariesNewestFirst(a: HermesSessionRow, b: HermesSessio
 function projectSessionSummary(root: HermesSessionInternalRow, chain: HermesSessionInternalRow[]): HermesSessionRow {
   const latest = latestSessionInChain(chain)
   const firstPreview = chain.map(session => session.preview).find(Boolean) || root.preview
-  const { parent_session_id: _parentSessionId, ...rootRow } = root
+  const rootRow = root
   return {
     ...rootRow,
     id: latest.id,
@@ -729,6 +730,47 @@ export async function getSessionMessagesFromDb(sessionId: string): Promise<{
       messages: messageRows.map(mapMessageRow),
       session: sessionRow ? mapRow(sessionRow) : null,
     }
+  } finally {
+    db.close()
+  }
+}
+
+export interface AncestorIdentityRow {
+  id: string
+  source: string
+  user_id: string | null
+  parent_session_id: string | null
+}
+
+/**
+ * Walk the parent_session_id chain upwards from a session and return the
+ * ancestor rows (nearest first, excluding the start session). Used to inherit
+ * visibility for identity-less subagent sessions.
+ */
+export async function getAncestorSessionRowsFromDb(sessionId: string, profile?: string, maxDepth = 8): Promise<AncestorIdentityRow[]> {
+  const db = await openSessionDb(profile)
+  try {
+    const stmt = db.prepare('SELECT s.id, s.source, s.user_id, s.parent_session_id FROM sessions s WHERE s.id = ?')
+    const ancestors: AncestorIdentityRow[] = []
+    const seen = new Set<string>([sessionId])
+    let cursor: string | null = sessionId
+    for (let depth = 0; depth < maxDepth && cursor; depth += 1) {
+      const row = stmt.get(cursor) as Record<string, unknown> | undefined
+      if (!row) break
+      const parentId = normalizeNullableString(row.parent_session_id)
+      if (!parentId || seen.has(parentId)) break
+      seen.add(parentId)
+      const parentRow = stmt.get(parentId) as Record<string, unknown> | undefined
+      if (!parentRow) break
+      ancestors.push({
+        id: String(parentRow.id || ''),
+        source: String(parentRow.source || ''),
+        user_id: normalizeNullableString(parentRow.user_id),
+        parent_session_id: normalizeNullableString(parentRow.parent_session_id),
+      })
+      cursor = normalizeNullableString(parentRow.parent_session_id)
+    }
+    return ancestors
   } finally {
     db.close()
   }

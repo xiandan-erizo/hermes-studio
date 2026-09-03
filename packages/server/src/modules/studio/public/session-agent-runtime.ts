@@ -5,6 +5,7 @@ export interface SessionAgentRuntimeDependencies {
   getHermesSessionDetail: (...args: any[]) => Promise<any>
   getHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
   getHermesSessionDetailPaginatedForProfile: (...args: any[]) => Promise<any>
+  getHermesAncestorSessionRows: (...args: any[]) => Promise<any[]>
   getExactHermesSessionDetailForProfile: (...args: any[]) => Promise<any>
   getHermesUsageStats: (...args: any[]) => Promise<any>
   listHermesSessionSummaries: (...args: any[]) => Promise<any[]>
@@ -30,6 +31,7 @@ export const getHermesModelContextLength = (...args: any[]): number => configure
 export const getHermesSessionDetail = (...args: any[]): Promise<any> => configured().getHermesSessionDetail(...args)
 export const getHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailForProfile(...args)
 export const getHermesSessionDetailPaginatedForProfile = (...args: any[]): Promise<any> => configured().getHermesSessionDetailPaginatedForProfile(...args)
+export const getHermesAncestorSessionRows = (...args: any[]): Promise<any[]> => configured().getHermesAncestorSessionRows(...args)
 export const getExactHermesSessionDetailForProfile = (...args: any[]): Promise<any> => configured().getExactHermesSessionDetailForProfile(...args)
 export const getHermesUsageStats = (...args: any[]): Promise<any> => configured().getHermesUsageStats(...args)
 export const listHermesSessionSummaries = (...args: any[]): Promise<any[]> => configured().listHermesSessionSummaries(...args)

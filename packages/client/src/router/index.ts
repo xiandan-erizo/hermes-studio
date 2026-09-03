@@ -181,6 +181,12 @@ const router = createRouter({
       meta: { hermesConfig: true },
     },
     {
+      path: '/hermes/external-identities',
+      name: 'hermes.externalIdentities',
+      component: () => import('@/views/hermes/ExternalIdentitiesView.vue'),
+      meta: { requiresElevated: true },
+    },
+    {
       path: '/social-messages',
       redirect: {
         name: 'hermes.connections',
