@@ -1,5 +1,6 @@
 import type { Context } from 'koa'
 import { authenticateUserToken, issueUserJwt } from '../public/auth'
+import { logger } from '../public/logging'
 import {
   createUser,
   findUserById,
@@ -185,6 +186,16 @@ export async function createInviteRecord(ctx: Context) {
   }
   const expiresInDays = body?.expiresInDays == null ? DEFAULT_INVITE_EXPIRES_DAYS : Number(body.expiresInDays)
   const maxUses = body?.maxUses == null ? 0 : Number(body.maxUses)
+
+  // Boundary case (logged, not enforced): a non-super-admin creating an
+  // invite for a profile that is not assigned to them.
+  const requester = ctx.state.user
+  if (requester && requester.role !== 'super_admin' && !listUserProfiles(requester.id).some(binding => binding.profile_name === profile)) {
+    logger.warn(
+      { adminId: requester.id, admin: requester.username, profile },
+      '[invites] admin created an invite for a profile not assigned to them',
+    )
+  }
 
   const result = createInvite({
     profileName: profile,

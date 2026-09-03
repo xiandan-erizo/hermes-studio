@@ -1,6 +1,7 @@
 import type { Context } from 'koa'
 import { issueUserJwt } from '../public/auth'
 import { addUserProfileBinding, listUserProfiles, touchUserLogin } from '../public/users'
+import { logger } from '../public/logging'
 import { resolveSsoAccount } from '../services/auth/sso-accounts'
 import {
   getSsoConfig,
@@ -142,6 +143,16 @@ export async function ssoCallback(ctx: Context) {
       addUserProfileBinding(user.id, validation.invite.profile_name, listUserProfiles(user.id).length === 0)
       consumeInviteUse(stateEntry.inviteCode)
     }
+  }
+
+  // Boundary case (logged, not enforced): a login that ends without any profile
+  // binding means the account went through direct SSO without an invite and
+  // will see an empty workspace. Admins should hand out a profile invite.
+  if (user.role !== 'super_admin' && listUserProfiles(user.id).length === 0) {
+    logger.warn(
+      { userId: user.id, username: user.username },
+      '[sso] account has no profile bindings after login (no invite used); workspace will be empty',
+    )
   }
 
   touchUserLogin(user.id)
