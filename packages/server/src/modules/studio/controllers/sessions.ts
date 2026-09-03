@@ -53,7 +53,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -1252,6 +1252,7 @@ export async function importHermesSession(ctx: any) {
     model: profileDefault.model,
     provider: profileDefault.provider,
     title: detail.title || undefined,
+    owner_user_id: ctx.state?.user?.id ?? null,
   })
 
   localUpdateSession(detail.id, {
@@ -1373,6 +1374,11 @@ export async function batchRemove(ctx: any) {
       results.errors.push({ id, error: `Profile "${existing.profile || 'default'}" is not available for this user` })
       continue
     }
+    if (existing && !canOperateSession(ctx.state?.user, existing)) {
+      results.failed++
+      results.errors.push({ id, error: 'Session not found' })
+      continue
+    }
 
     const codingAgentSession = isCodingAgentSession(existing)
     if (codingAgentSession) stopCodingAgentSessionRun(id, { reportClosed: false })
@@ -1414,7 +1420,15 @@ export async function usageBatch(ctx: any) {
     return
   }
   const idList = ids.split(',').filter(Boolean)
-  ctx.body = getUsageBatch(idList)
+  if (ctx.state?.user?.role === 'super_admin') {
+    ctx.body = getUsageBatch(idList)
+    return
+  }
+  const visibleIds = idList.filter(id => {
+    const session = localGetSession(id)
+    return session ? canReadSession(ctx.state?.user, session) : false
+  })
+  ctx.body = getUsageBatch(visibleIds)
 }
 
 export async function usageSingle(ctx: any) {

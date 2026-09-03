@@ -14,6 +14,7 @@ const getSessionDetailFromDbWithProfileMock = vi.fn()
 const getExactSessionDetailFromDbWithProfileMock = vi.fn()
 const getUsageStatsFromDbMock = vi.fn()
 const getSessionMock = vi.fn()
+const getUsageBatchMock = vi.hoisted(() => vi.fn())
 const deleteHermesSessionForProfileMock = vi.fn()
 const localListSessionsMock = vi.fn()
 const localGetSessionDetailMock = vi.fn()
@@ -128,7 +129,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () 
 vi.mock('../../packages/server/src/modules/studio/repositories/usage-store', () => ({
   deleteUsage: vi.fn(),
   getUsage: vi.fn(),
-  getUsageBatch: vi.fn(),
+  getUsageBatch: getUsageBatchMock,
   getLocalUsageStats: getLocalUsageStatsMock,
   getRecordedUsageSessionIds: getRecordedUsageSessionIdsMock,
 }))
@@ -2121,6 +2122,7 @@ describe('session conversations controller', () => {
     getSessionMock.mockImplementation((id: string) => ({
       id,
       profile: id === 'travel-session' ? 'travel' : 'default',
+      owner_user_id: 1,
     }))
     getExactSessionDetailFromDbWithProfileMock.mockResolvedValue({ id: 'matched', messages: [] })
     deleteHermesSessionForProfileMock.mockResolvedValue(true)
@@ -2362,5 +2364,49 @@ describe('session conversations controller', () => {
       expect(localGetSessionDetailMock).toHaveBeenCalledWith('cli-123')
       expect(JSON.parse(ctx.body)).toMatchObject({ id: 'cli-123' })
     })
+  })
+
+  it('batch deletes refuse another user session for a non-super-admin', async () => {
+    getSessionMock.mockImplementation((id: string) => ({
+      id,
+      profile: 'default',
+      owner_user_id: 2,
+    }))
+    localDeleteSessionMock.mockReturnValue(true)
+    deleteHermesSessionForProfileMock.mockResolvedValue(true)
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      request: { body: { sessions: [{ id: 'other-session', profile: 'default' }] } },
+      state: { user: { id: 1, role: 'admin' } },
+      body: null,
+    }
+    await mod.batchRemove(ctx)
+
+    expect(localDeleteSessionMock).not.toHaveBeenCalled()
+    expect(deleteHermesSessionForProfileMock).not.toHaveBeenCalled()
+    expect(ctx.body).toMatchObject({ ok: true, deleted: 0, failed: 1 })
+  })
+
+  it('usage batch hides other users sessions from a non-super-admin', async () => {
+    getUsageBatchMock.mockImplementation((ids: string[]) => Object.fromEntries(
+      ids.map(id => [id, { input_tokens: id === 'own-session' ? 1 : 3, output_tokens: id === 'own-session' ? 2 : 4 }]),
+    ))
+    getSessionMock.mockImplementation((id: string) => (
+      id === 'own-session'
+        ? { id, profile: 'default', owner_user_id: 1 }
+        : { id, profile: 'default', owner_user_id: 2 }
+    ))
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      query: { ids: 'own-session,other-session' },
+      state: { user: { id: 1, role: 'admin' } },
+      body: null,
+    }
+    await mod.usageBatch(ctx)
+
+    expect(getUsageBatchMock).toHaveBeenCalledWith(['own-session'])
+    expect(ctx.body).toEqual({ 'own-session': { input_tokens: 1, output_tokens: 2 } })
   })
 })
