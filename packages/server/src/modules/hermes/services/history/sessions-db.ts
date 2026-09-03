@@ -658,7 +658,7 @@ function aggregateSessionDetail(
     .filter((value): value is number => value != null)
   const firstPreview = chain.map(session => session.preview).find(Boolean) || root.preview
 
-  const { parent_session_id: _parentSessionId, ...rootRow } = root
+  const rootRow = root
 
   return {
     ...rootRow,
