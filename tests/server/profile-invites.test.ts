@@ -114,17 +114,21 @@ describe('Profile invites', () => {
       provider: 'oidc',
       subject: 'subject-1',
       username: 'bob',
+      displayName: 'Bob Example',
       email: 'bob@example.com',
       userId: user!.id,
     })
 
     expect(identity).not.toBeNull()
+    expect(identity!.display_name).toBe('Bob Example')
     const found = identities.findSsoIdentity('oidc', 'subject-1')
     expect(found!.user_id).toBe(user!.id)
     expect(identities.findSsoIdentity('oidc', 'other')).toBeNull()
+    expect(identities.findSsoIdentityByUserId(user!.id)?.email).toBe('bob@example.com')
 
-    identities.updateSsoIdentityProfile({ id: identity!.id, email: 'bob2@example.com' })
+    identities.updateSsoIdentityProfile({ id: identity!.id, displayName: 'Robert Example', email: 'bob2@example.com' })
     expect(identities.findSsoIdentity('oidc', 'subject-1')!.email).toBe('bob2@example.com')
+    expect(identities.findSsoIdentity('oidc', 'subject-1')!.display_name).toBe('Robert Example')
   })
 })
 

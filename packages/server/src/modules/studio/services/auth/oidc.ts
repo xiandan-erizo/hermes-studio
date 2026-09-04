@@ -31,6 +31,7 @@ export interface OidcDiscoveryDocument {
 export interface OidcIdentityClaims {
   sub: string
   username: string
+  displayName: string
   email: string
 }
 
@@ -288,15 +289,61 @@ export async function fetchUserInfoClaims(accessToken: string): Promise<IdTokenC
   return await response.json() as IdTokenClaims
 }
 
+function claimText(value: unknown, maxLength: number): string {
+  return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
+}
+
 export function toIdentityClaims(claims: IdTokenClaims): OidcIdentityClaims {
-  const sub = String(claims.sub || '')
-  const fallback = claims.email || claims.name || sub
-  const username = String(claims.preferred_username || claims.name || fallback).trim().slice(0, 80)
+  const sub = claimText(claims.sub, 255)
+  const displayName = claimText(claims.name, 255)
+  const email = claimText(claims.email, 255)
+  const username = claimText(claims.preferred_username, 80) || displayName.slice(0, 80) || email.slice(0, 80) || sub
   return {
     sub,
     username: username || sub,
-    email: String(claims.email || '').trim().slice(0, 255),
+    displayName,
+    email,
   }
+}
+
+function mergeOidcIdentityClaims(idTokenClaims: IdTokenClaims, userInfoClaims: IdTokenClaims): OidcIdentityClaims {
+  return toIdentityClaims({
+    sub: idTokenClaims.sub,
+    preferred_username: claimText(idTokenClaims.preferred_username, 80) || userInfoClaims.preferred_username,
+    name: claimText(idTokenClaims.name, 255) || userInfoClaims.name,
+    email: claimText(idTokenClaims.email, 255) || userInfoClaims.email,
+  })
+}
+
+function hasCompleteIdentityProfile(claims: OidcIdentityClaims): boolean {
+  return Boolean(claims.sub && claims.username && claims.displayName && claims.email)
+}
+
+export async function resolveOidcIdentityClaims(
+  tokens: { idToken: string | null; accessToken: string | null },
+  expectedNonce: string,
+): Promise<OidcIdentityClaims> {
+  if (!tokens.idToken) {
+    if (!tokens.accessToken) throw new Error('no identity credentials')
+    return toIdentityClaims(await fetchUserInfoClaims(tokens.accessToken))
+  }
+
+  const idTokenClaims = await verifyIdToken(tokens.idToken, expectedNonce)
+  const identity = toIdentityClaims(idTokenClaims)
+  if (!tokens.accessToken) return identity
+
+  let userInfoClaims: IdTokenClaims
+  try {
+    userInfoClaims = await fetchUserInfoClaims(tokens.accessToken)
+  } catch (error) {
+    if (hasCompleteIdentityProfile(identity)) return identity
+    throw error
+  }
+
+  if (claimText(userInfoClaims.sub, 255) !== identity.sub) {
+    throw new Error('OIDC userinfo subject mismatch')
+  }
+  return mergeOidcIdentityClaims(idTokenClaims, userInfoClaims)
 }
 
 // Exported for tests.

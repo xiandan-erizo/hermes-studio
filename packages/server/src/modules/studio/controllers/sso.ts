@@ -9,9 +9,7 @@ import {
   prepareSsoChallenge,
   takeSsoState,
   exchangeAuthorizationCode,
-  fetchUserInfoClaims,
-  toIdentityClaims,
-  verifyIdToken,
+  resolveOidcIdentityClaims,
 } from '../services/auth/oidc'
 import { validateInviteForUse, consumeInviteUse } from '../services/auth/profile-invites'
 
@@ -113,13 +111,7 @@ export async function ssoCallback(ctx: Context) {
       codeVerifier: stateEntry.codeVerifier,
       redirectUri: stateEntry.redirectUri,
     })
-    if (tokens.idToken) {
-      claims = toIdentityClaims(await verifyIdToken(tokens.idToken, stateEntry.nonce))
-    } else if (tokens.accessToken) {
-      claims = toIdentityClaims(await fetchUserInfoClaims(tokens.accessToken))
-    } else {
-      throw new Error('no identity credentials')
-    }
+    claims = await resolveOidcIdentityClaims(tokens, stateEntry.nonce)
   } catch {
     frontendErrorRedirect(ctx, 'sso_failed')
     return

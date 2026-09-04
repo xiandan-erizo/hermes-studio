@@ -554,6 +554,7 @@ export const SSO_IDENTITIES_SCHEMA: Record<string, string> = {
   provider: "TEXT NOT NULL DEFAULT 'oidc'",
   subject: 'TEXT NOT NULL',
   username: "TEXT NOT NULL DEFAULT ''",
+  display_name: "TEXT NOT NULL DEFAULT ''",
   email: "TEXT NOT NULL DEFAULT ''",
   user_id: 'INTEGER NOT NULL',
   created_at: 'INTEGER NOT NULL',

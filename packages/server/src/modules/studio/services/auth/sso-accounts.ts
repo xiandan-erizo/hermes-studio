@@ -10,6 +10,7 @@ import {
 export interface SsoAccountClaims {
   sub: string
   username: string
+  displayName: string
   email: string
 }
 
@@ -38,7 +39,12 @@ export function resolveSsoAccount(claims: SsoAccountClaims): { user: UserRecord;
   if (existing) {
     const user = findUserById(existing.user_id)
     if (user) {
-      updateSsoIdentityProfile({ id: existing.id, username: claims.username, email: claims.email })
+      updateSsoIdentityProfile({
+        id: existing.id,
+        username: claims.username,
+        displayName: claims.displayName,
+        email: claims.email,
+      })
       return { user, identity: existing }
     }
     return null
@@ -58,6 +64,7 @@ export function resolveSsoAccount(claims: SsoAccountClaims): { user: UserRecord;
     provider: 'oidc',
     subject: claims.sub,
     username: claims.username,
+    displayName: claims.displayName,
     email: claims.email,
     userId: user.id,
   })
