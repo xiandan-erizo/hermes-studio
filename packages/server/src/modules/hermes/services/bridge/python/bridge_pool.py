@@ -10,10 +10,16 @@ import threading
 import time
 import traceback
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
+_BRIDGE_DIR = Path(__file__).resolve().parent
+if str(_BRIDGE_DIR) not in sys.path:
+    sys.path.insert(0, str(_BRIDGE_DIR))
+
+from bridge_identity import format_personal_chat_identity_prompt, normalize_personal_chat_identity
 from bridge_runtime import (
     APPROVAL_TIMEOUT_MS,
     APPROVAL_TIMEOUT_SECONDS,
@@ -80,6 +86,7 @@ def _set_bridge_session_vars(
     profile: str | None,
     workspace: str | None,
     background_delegation_enabled: bool,
+    authenticated_user_context: dict[str, str] | None = None,
 ) -> Any:
     """Bind the richest session context supported by the installed runtime."""
     from gateway.session_context import set_session_vars
@@ -96,6 +103,7 @@ def _set_bridge_session_vars(
         "profile": str(profile or "default"),
         "cwd": str(workspace or ""),
         "async_delivery": background_delegation_enabled,
+        "authenticated_user_context": authenticated_user_context,
     }
     try:
         parameters = inspect.signature(set_session_vars).parameters.values()
@@ -107,6 +115,21 @@ def _set_bridge_session_vars(
     except (TypeError, ValueError):
         supported = values
     return set_session_vars(**supported)
+
+
+@contextmanager
+def _authenticated_user_context_scope(identity: dict[str, str] | None) -> Iterator[None]:
+    if identity is None:
+        yield
+        return
+
+    from gateway.session_context import clear_session_vars, set_session_vars
+
+    tokens = set_session_vars(authenticated_user_context=identity)
+    try:
+        yield
+    finally:
+        clear_session_vars(tokens)
 
 
 class SessionDbHolder:
@@ -391,11 +414,27 @@ class AgentPool:
         model: str | None = None,
         provider: str | None = None,
         background_delegation_enabled: bool | None = None,
+        personal_chat_identity: Any = None,
     ) -> AgentSession:
         requested_model = str(model or "").strip()
         requested_provider = str(provider or "").strip()
+        normalized_identity = normalize_personal_chat_identity(personal_chat_identity)
         with self._lock:
             existing = self._sessions.get(session_id)
+            if existing is not None:
+                pinned_identity = existing.config.get("personal_chat_identity")
+                if isinstance(pinned_identity, dict):
+                    if (
+                        normalized_identity is None
+                        or normalized_identity.get("email") != pinned_identity.get("email")
+                    ):
+                        raise ValueError("personal chat identity does not match the bound session")
+                elif normalized_identity is not None:
+                    if existing.running:
+                        raise ValueError("personal chat identity cannot replace a running anonymous session")
+                    self._destroy_session(session_id)
+                    existing = None
+
             if existing is not None:
                 # If profile changed, destroy old session and recreate
                 profile_changed = bool(profile and existing.config.get("profile") != profile)
@@ -446,7 +485,7 @@ class AgentPool:
             _suppress_bridge_platform_hint()
             from run_agent import AIAgent
 
-            with _profile_env(profile):
+            with _authenticated_user_context_scope(normalized_identity), _profile_env(profile):
                 _refresh_worker_profile_env()
                 _refresh_approval_allowlist()
                 discovered_mcp_tools = _discover_bridge_mcp_tools()
@@ -454,7 +493,11 @@ class AgentPool:
                 resolved_model = requested_model or _resolve_model(cfg)
                 runtime = _resolve_runtime(resolved_model, requested_provider or None)
                 agent_cfg = cfg.get("agent") or {}
-                prompt = str(agent_cfg.get("system_prompt", "") or "").strip() or None
+                prompt = str(agent_cfg.get("system_prompt", "") or "").strip()
+                identity_prompt = format_personal_chat_identity_prompt(normalized_identity)
+                if identity_prompt:
+                    prompt = f"{prompt}\n\n{identity_prompt}" if prompt else identity_prompt
+                effective_prompt = prompt or None
 
                 agent = AIAgent(
                     model=resolved_model,
@@ -475,7 +518,7 @@ class AgentPool:
                     platform=_bridge_platform(),
                     session_id=session_id,
                     session_db=self._db.get_for_profile(profile),
-                    ephemeral_system_prompt=prompt,
+                    ephemeral_system_prompt=effective_prompt,
                     status_callback=self._status_callback(session_id),
                     thinking_callback=self._make_thinking_callback(session_id),
                     reasoning_callback=self._text_event_callback(session_id, "reasoning.delta"),
@@ -515,6 +558,9 @@ class AgentPool:
                         # This is an Agent-session policy, not a per-turn flag.
                         # Callers select it when the cached AIAgent is created.
                         "background_delegation_enabled": background_delegation_enabled is not False,
+                        "personal_chat_identity": (
+                            dict(normalized_identity) if normalized_identity is not None else None
+                        ),
                     },
                 )
                 self._install_boundary_interrupt(session)
@@ -944,6 +990,7 @@ class AgentPool:
         provider: str | None = None,
         workspace: str | None = None,
         background_delegation_enabled: bool | None = None,
+        personal_chat_identity: Any = None,
     ) -> dict[str, Any]:
         session = self.get_or_create(
             session_id,
@@ -951,6 +998,7 @@ class AgentPool:
             model=model,
             provider=provider,
             background_delegation_enabled=background_delegation_enabled,
+            personal_chat_identity=personal_chat_identity,
         )
         session_cwd_bound = _bind_session_workspace_cwd(session.session_id, workspace)
         try:
@@ -1649,6 +1697,7 @@ class AgentPool:
         source: str | None = None,
         reasoning_effort: str | None = None,
         background_delegation_enabled: bool | None = None,
+        personal_chat_identity: Any = None,
     ) -> RunRecord:
         session = self.get_or_create(
             session_id,
@@ -1656,6 +1705,7 @@ class AgentPool:
             model=model,
             provider=provider,
             background_delegation_enabled=background_delegation_enabled,
+            personal_chat_identity=personal_chat_identity,
         )
         # Install after agent construction so any runtime plugin initialization
         # has completed. Rechecking on every run also recovers from a forced
@@ -1691,14 +1741,14 @@ class AgentPool:
 
         thread = threading.Thread(
             target=self._run_chat,
-            args=(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort),
+            args=(session, record, message, storage_message, instructions, conversation_history, profile, force_compress, workspace, source, reasoning_effort, session.config.get("personal_chat_identity")),
             daemon=True,
             name=f"hermes-bridge-run-{run_id[:8]}",
         )
         thread.start()
         return record
 
-    def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None) -> None:
+    def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None, personal_chat_identity: dict[str, str] | None = None) -> None:
         with _profile_env(profile):
             _refresh_approval_allowlist()
             _install_execute_code_approval_memory_patch()
@@ -1735,6 +1785,7 @@ class AgentPool:
                         profile,
                         workspace,
                         session.config.get("background_delegation_enabled", True) is not False,
+                        personal_chat_identity,
                     )
                 except Exception:
                     session_context_tokens = None
