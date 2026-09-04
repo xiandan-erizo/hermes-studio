@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto'
 
 const originalEnv = process.env
 const originalFetch = globalThis.fetch
+const invalidSubjects: Array<[string, Record<string, unknown>]> = [
+  ['an absent subject', {}],
+  ['a non-string subject', { sub: 123 }],
+  ['a 256-character subject', { sub: 's'.repeat(256) }],
+]
 
 function signedIdToken(claims: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256' })).toString('base64url')
@@ -108,5 +113,31 @@ describe('OIDC identity claims', () => {
       }),
       accessToken: 'access-token',
     }, 'nonce-3')).rejects.toThrow('OIDC userinfo subject mismatch')
+  })
+
+  it.each(invalidSubjects)('rejects %s in a verified ID token', async (_label, invalidSubject) => {
+    mockOidcResponses({ sub: 'subject-1', name: 'Bob Example', email: 'bob@example.com' })
+    const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
+
+    await expect(oidc.resolveOidcIdentityClaims({
+      idToken: signedIdToken({
+        iss: 'https://sso.example.test',
+        aud: 'client-id',
+        exp: Math.floor(Date.now() / 1000) + 60,
+        nonce: 'nonce-4',
+        ...invalidSubject,
+      }),
+      accessToken: null,
+    }, 'nonce-4')).rejects.toThrow('OIDC identity subject is invalid')
+  })
+
+  it.each(invalidSubjects)('rejects %s in a UserInfo-only response', async (_label, invalidSubject) => {
+    mockOidcResponses({ name: 'Bob Example', email: 'bob@example.com', ...invalidSubject })
+    const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
+
+    await expect(oidc.resolveOidcIdentityClaims({
+      idToken: null,
+      accessToken: 'access-token',
+    }, 'nonce-5')).rejects.toThrow('OIDC identity subject is invalid')
   })
 })

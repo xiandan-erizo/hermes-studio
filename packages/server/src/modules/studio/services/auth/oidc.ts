@@ -257,7 +257,8 @@ export async function verifyIdToken(idToken: string, expectedNonce: string): Pro
   if (!config) throw new Error('SSO is not configured')
   const doc = await fetchDiscovery(config)
   const jwt = decodeJwtSegment(idToken)
-  if (!jwt || !jwt.claims.sub) throw new Error('OIDC id_token is malformed')
+  if (!jwt) throw new Error('OIDC id_token is malformed')
+  claimSubject(jwt.claims.sub)
 
   const now = Math.floor(Date.now() / 1000)
   if (jwt.claims.exp && now >= jwt.claims.exp) throw new Error('OIDC id_token is expired')
@@ -294,7 +295,10 @@ function claimText(value: unknown, maxLength: number): string {
 }
 
 function claimSubject(value: unknown): string {
-  return typeof value === 'string' && value.length <= 255 ? value : ''
+  if (typeof value !== 'string' || value.length === 0 || value.length > 255) {
+    throw new Error('OIDC identity subject is invalid')
+  }
+  return value
 }
 
 export function toIdentityClaims(claims: IdTokenClaims): OidcIdentityClaims {
