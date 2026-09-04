@@ -48,6 +48,7 @@ const recordBridgeToolCompletedMock = vi.fn()
 const recordBridgeMoaDisplayToolMock = vi.fn()
 const resolveBridgeRunModelConfigMock = vi.fn()
 const issueModelRunJwtMock = vi.fn(async () => 'model-run-token')
+const findSsoIdentityByUserIdMock = vi.fn()
 const startWorkspaceRunCheckpointMock = vi.fn()
 const completeWorkspaceRunCheckpointMock = vi.fn()
 const homes: string[] = []
@@ -119,6 +120,10 @@ vi.mock('../../packages/server/src/modules/studio/public/auth', () => ({
   issueModelRunJwt: issueModelRunJwtMock,
 }))
 
+vi.mock('../../packages/server/src/modules/studio/repositories/sso-identities-store', () => ({
+  findSsoIdentityByUserId: findSsoIdentityByUserIdMock,
+}))
+
 function makeSocket() {
   return {
     connected: true,
@@ -154,6 +159,7 @@ describe('bridge run final context usage', () => {
     vi.clearAllMocks()
     getSystemPromptMock.mockReturnValue('system prompt')
     issueModelRunJwtMock.mockResolvedValue('model-run-token')
+    findSsoIdentityByUserIdMock.mockReturnValue(null)
     getSessionMock.mockReturnValue({ id: 'session-1', profile: 'default', model: '', provider: '' })
     resolveBridgeRunModelConfigMock.mockResolvedValue({ model: 'gpt-test', provider: 'openai' })
     buildCompressedHistoryMock.mockResolvedValue([{ role: 'user', content: 'previous' }])
@@ -382,6 +388,218 @@ describe('bridge run final context usage', () => {
       outputTokens: 7,
       contextTokens: 12345,
     }))
+  })
+
+  it('passes the authenticated SSO customer identity to context estimation and chat', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    socket.data.user = { id: 42, username: 'local-user', role: 'user' }
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      model: '',
+      provider: '',
+      owner_user_id: 42,
+    })
+    findSsoIdentityByUserIdMock.mockReturnValue({
+      id: 9,
+      provider: 'oidc',
+      subject: 'customer-subject',
+      username: 'customer',
+      display_name: 'Customer Name',
+      email: '  Customer+Tag@Example.COM  ',
+      user_id: 42,
+      created_at: 1,
+      updated_at: 1,
+    })
+    const state = makeState()
+    const sessionMap = new Map([['session-1', state]])
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-identity', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({
+        token_count: 12,
+        fixed_context_tokens: 10,
+        message_count: 1,
+      }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-identity', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+    const expectedIdentity = {
+      version: 1,
+      source: 'hermes_studio',
+      email: 'customer+tag@example.com',
+      username: 'customer',
+      displayName: 'Customer Name',
+    }
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      {
+        input: 'hello',
+        session_id: 'session-1',
+        personal_chat_identity: {
+          version: 1,
+          source: 'hermes_studio',
+          email: 'attacker@example.net',
+        },
+      } as any,
+      'default',
+      sessionMap,
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(bridge.contextEstimate).toHaveBeenCalledWith(
+      'session-1',
+      [],
+      expect.any(String),
+      'default',
+      expect.objectContaining({ personal_chat_identity: expectedIdentity }),
+    )
+    expect(bridge.chat).toHaveBeenCalledWith(
+      'session-1',
+      'hello',
+      expect.any(Array),
+      expect.any(String),
+      'default',
+      expect.objectContaining({ personal_chat_identity: expectedIdentity }),
+    )
+  })
+
+  it('fails an ordinary user without an SSO email before calling the bridge', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    socket.data.user = { id: 42, username: 'local-user', role: 'user' }
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      model: '',
+      provider: '',
+      owner_user_id: 42,
+    })
+    findSsoIdentityByUserIdMock.mockReturnValue({
+      id: 9,
+      provider: 'oidc',
+      subject: 'customer-subject',
+      username: 'customer',
+      display_name: 'Customer Name',
+      email: '   ',
+      user_id: 42,
+      created_at: 1,
+      updated_at: 1,
+    })
+    const bridge = {
+      chat: vi.fn(),
+      contextEstimate: vi.fn(),
+      streamOutput: vi.fn(),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      new Map([['session-1', makeState()]]),
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(bridge.contextEstimate).not.toHaveBeenCalled()
+    expect(bridge.chat).not.toHaveBeenCalled()
+    expect(socket.emit.mock.calls.filter(([event]: [string]) => event === 'run.failed')).toEqual([
+      ['run.failed', expect.objectContaining({ error: expect.stringContaining('SSO account email is required') })],
+    ])
+  })
+
+  it('starts a super admin without an SSO identity anonymously', async () => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    socket.data.user = { id: 1, username: 'admin', role: 'super_admin' }
+    const state = makeState()
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-admin', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({ token_count: 10, fixed_context_tokens: 8, message_count: 1 }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: 'run-admin', done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1' },
+      'default',
+      new Map([['session-1', state]]),
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(bridge.chat).toHaveBeenCalled()
+    expect(bridge.chat.mock.calls[0][5]).not.toHaveProperty('personal_chat_identity')
+    expect(bridge.contextEstimate.mock.calls[0][4]).not.toHaveProperty('personal_chat_identity')
+  })
+
+  it.each(['group_chat', 'workflow'] as const)('omits personal identity for %s runs', async source => {
+    const emit = vi.fn()
+    const nsp = makeNamespace(emit)
+    const socket = makeSocket()
+    socket.data.user = { id: 42, username: 'local-user', role: 'user' }
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      model: '',
+      provider: '',
+      owner_user_id: 42,
+    })
+    findSsoIdentityByUserIdMock.mockReturnValue({
+      id: 9,
+      provider: 'oidc',
+      subject: 'customer-subject',
+      username: 'customer',
+      display_name: 'Customer Name',
+      email: 'customer@example.com',
+      user_id: 42,
+      created_at: 1,
+      updated_at: 1,
+    })
+    const state = makeState()
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: `run-${source}`, status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({ token_count: 10, fixed_context_tokens: 8, message_count: 1 }),
+      streamOutput: vi.fn(async function* () {
+        yield { run_id: `run-${source}`, done: true, status: 'completed', output: 'done' }
+      }),
+    } as any
+
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    await handleBridgeRun(
+      nsp,
+      socket,
+      { input: 'hello', session_id: 'session-1', source },
+      'default',
+      new Map([['session-1', state]]),
+      bridge,
+      false,
+      vi.fn(),
+      vi.fn(),
+    )
+
+    expect(bridge.chat.mock.calls[0][5]).not.toHaveProperty('personal_chat_identity')
+    expect(bridge.contextEstimate.mock.calls[0][4]).not.toHaveProperty('personal_chat_identity')
   })
 
   it('forwards MoA reference and aggregating events from bridge chunks', async () => {
@@ -1831,6 +2049,25 @@ describe('bridge run final context usage', () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
+    socket.data.user = { id: 42, username: 'local-user', role: 'user' }
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      model: '',
+      provider: '',
+      owner_user_id: 42,
+    })
+    findSsoIdentityByUserIdMock.mockReturnValue({
+      id: 9,
+      provider: 'oidc',
+      subject: 'customer-subject',
+      username: 'customer',
+      display_name: 'Customer Name',
+      email: 'Customer@Example.COM',
+      user_id: 42,
+      created_at: 1,
+      updated_at: 1,
+    })
     const state = makeState()
     const sessionMap = new Map([['session-1', state]])
     recordBridgeToolCompletedMock.mockReturnValue({
@@ -1895,6 +2132,13 @@ describe('bridge run final context usage', () => {
       provider: 'openai',
       profile: 'default',
       reasoningEffort: 'high',
+      personalChatIdentity: {
+        version: 1,
+        source: 'hermes_studio',
+        email: 'customer@example.com',
+        username: 'customer',
+        displayName: 'Customer Name',
+      },
       messages: exactMessages,
     }))
   })
@@ -1903,6 +2147,7 @@ describe('bridge run final context usage', () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
+    socket.data.user = { id: 1, username: 'admin', role: 'super_admin' }
     const state = makeState()
     const sessionMap = new Map([['session-1', state]])
     state.messages.push({
@@ -1928,6 +2173,13 @@ describe('bridge run final context usage', () => {
       instructions: 'origin system instructions',
       workspace: null,
       reasoningEffort: 'high',
+      personalChatIdentity: {
+        version: 1 as const,
+        source: 'hermes_studio' as const,
+        email: 'customer@example.com',
+        username: 'customer',
+        displayName: 'Customer Name',
+      },
     }
     state.backgroundContinuationContexts = { 'delegation-1': callbackContext }
     resolveBridgeRunModelConfigMock.mockResolvedValueOnce({ model: 'origin-model', provider: 'origin-provider' })
@@ -1972,6 +2224,7 @@ describe('bridge run final context usage', () => {
         model: 'origin-model',
         provider: 'origin-provider',
         reasoning_effort: 'high',
+        personal_chat_identity: callbackContext.personalChatIdentity,
       }),
     )
     expect(bridge.chat.mock.calls[0][2]).not.toContainEqual(expect.objectContaining({

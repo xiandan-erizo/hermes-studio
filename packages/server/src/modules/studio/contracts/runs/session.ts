@@ -11,6 +11,14 @@ export interface EkkoBackgroundContinuationContext {
   memoryPolicy: 'disabled'
 }
 
+export interface PersonalChatIdentitySnapshot {
+  version: 1
+  source: 'hermes_studio'
+  email: string
+  username?: string
+  displayName?: string
+}
+
 export interface HermesBackgroundContinuationContext {
   runtime: 'hermes'
   version: 1
@@ -24,6 +32,7 @@ export interface HermesBackgroundContinuationContext {
   instructions?: string
   workspace?: string | null
   reasoningEffort?: string
+  personalChatIdentity?: PersonalChatIdentitySnapshot
 }
 
 export type BackgroundContinuationContext =

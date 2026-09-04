@@ -51,6 +51,11 @@ import type { AuthenticatedUser } from '../../public/auth'
 import { ensureHermesRunWorkspace } from './workspace'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
+import {
+  PersonalChatIdentityResolutionError,
+  resolvePersonalChatIdentity,
+  type PersonalChatIdentitySnapshot,
+} from './personal-chat-identity'
 
 const BRIDGE_USAGE_FLUSH_DELAY_MS = 200
 const BRIDGE_TITLE_EVENT_POLL_INTERVAL_MS = 500
@@ -381,6 +386,7 @@ async function ensureBridgeFixedContext(args: {
   bridge: AgentBridgeClient
   refresh?: boolean
   backgroundDelegationEnabled?: boolean
+  personalChatIdentity?: PersonalChatIdentitySnapshot
 }): Promise<number | undefined> {
   const cached = bridgeContextMatches(args.state, args)
     ? getCachedBridgeContextOverhead(args.state)
@@ -399,6 +405,9 @@ async function ensureBridgeFixedContext(args: {
         workspace: args.workspace ?? undefined,
         ...(args.backgroundDelegationEnabled !== undefined
           ? { background_delegation_enabled: args.backgroundDelegationEnabled }
+          : {}),
+        ...(args.personalChatIdentity
+          ? { personal_chat_identity: args.personalChatIdentity }
           : {}),
       },
     )
@@ -469,6 +478,24 @@ export async function handleBridgeRun(
   // super_admin). Legacy mixed-semantics user_id is never consulted.
   if (sessionRow && socketUser && !canOperateSession(socketUser, sessionRow)) {
     socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'Session is not available for this user' })
+    return
+  }
+  let personalChatIdentity: PersonalChatIdentitySnapshot | undefined
+  try {
+    // Group Chat and Workflow customer identity remain deferred until those
+    // surfaces have their own authoritative membership semantics.
+    personalChatIdentity = callbackContext
+      ? callbackContext.personalChatIdentity
+      : runSource === 'cli'
+        ? resolvePersonalChatIdentity(socketUser)
+        : undefined
+  } catch (err) {
+    if (!(err instanceof PersonalChatIdentityResolutionError)) throw err
+    socket.emit('run.failed', {
+      event: 'run.failed',
+      queue_id: data.queue_id,
+      error: err.message,
+    })
     return
   }
   // Claim ownership for state-less legacy sessions started by an authorized
@@ -691,6 +718,7 @@ export async function handleBridgeRun(
           bridge,
           refresh: true,
           backgroundDelegationEnabled,
+          personalChatIdentity,
         })
         const contextTokens = fixedContextTokens == null
           ? localMessageTokens
@@ -734,6 +762,7 @@ export async function handleBridgeRun(
         instructions: fullInstructions,
         workspace,
         reasoningEffort,
+        personalChatIdentity,
       },
     }
     const bridgeStorageInput = data.storage_message !== undefined
@@ -768,6 +797,7 @@ export async function handleBridgeRun(
         ...(runMetadata.originContext.reasoningEffort
           ? { reasoning_effort: runMetadata.originContext.reasoningEffort }
           : {}),
+        ...(personalChatIdentity ? { personal_chat_identity: personalChatIdentity } : {}),
       },
     )
     state.runId = started.run_id
@@ -922,6 +952,7 @@ export async function handleBridgeRun(
       usage: errUsage,
       emit,
       bridge,
+      personalChatIdentity,
     })
     emit('run.failed', {
       event: 'run.failed',
@@ -1136,6 +1167,7 @@ async function refreshFinalContextUsage(args: {
   usage: { inputTokens: number; outputTokens: number }
   emit: (event: string, payload: any) => void
   bridge: AgentBridgeClient
+  personalChatIdentity?: PersonalChatIdentitySnapshot
 }): Promise<number | undefined> {
   try {
     const finalHistory = await buildDbSnapshotAwareHistory(
@@ -1155,6 +1187,7 @@ async function refreshFinalContextUsage(args: {
       instructions: args.instructions,
       state: args.state,
       bridge: args.bridge,
+      personalChatIdentity: args.personalChatIdentity,
     })
     const contextTokens = updateMessageContextTokenUsage(
       args.sessionId,
@@ -1794,6 +1827,7 @@ async function applyBridgeChunkAsync(
     usage,
     emit,
     bridge,
+    personalChatIdentity: runMetadata?.originContext.personalChatIdentity,
   })
   const hadQueuedRunBeforeGoalEvaluation = state.queue.length > 0
   const eventName = terminalError ? 'run.failed' : 'run.completed'
