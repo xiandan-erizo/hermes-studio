@@ -72,6 +72,59 @@ describe('AgentBridgeClient background delegation requests', () => {
     }))
   })
 
+  it('whitelists personal chat identity fields for chat and context estimates', async () => {
+    const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
+    const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
+    const request = vi.spyOn(client, 'request')
+      .mockResolvedValueOnce({
+        ok: true,
+        run_id: 'run-whitelisted-personal-identity',
+        session_id: 'session-whitelisted-personal-identity',
+        status: 'running',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        session_id: 'session-whitelisted-personal-identity',
+        message_count: 0,
+        tool_count: 0,
+        system_prompt_chars: 0,
+      })
+    const extendedIdentity = {
+      version: 1 as const,
+      source: 'hermes_studio' as const,
+      email: 'bob@example.com',
+      username: 'bob',
+      displayName: 'Bob Example',
+      subject: 'oidc-subject',
+      role: 'super_admin',
+      token: 'sensitive-token',
+      rawClaims: { groups: ['administrators'] },
+    }
+    const expectedIdentity = {
+      version: 1,
+      source: 'hermes_studio',
+      email: 'bob@example.com',
+      username: 'bob',
+      displayName: 'Bob Example',
+    }
+
+    await client.chat('session-whitelisted-personal-identity', 'hello', undefined, undefined, 'default', {
+      personal_chat_identity: extendedIdentity,
+    })
+    await client.contextEstimate('session-whitelisted-personal-identity', [], undefined, 'default', {
+      personal_chat_identity: extendedIdentity,
+    })
+
+    for (const call of request.mock.calls) {
+      const payload = call[0] as { personal_chat_identity?: unknown }
+      expect(payload.personal_chat_identity).toEqual(expectedIdentity)
+      expect(payload.personal_chat_identity).not.toHaveProperty('subject')
+      expect(payload.personal_chat_identity).not.toHaveProperty('role')
+      expect(payload.personal_chat_identity).not.toHaveProperty('token')
+      expect(payload.personal_chat_identity).not.toHaveProperty('rawClaims')
+    }
+  })
+
   it('omits personal chat identity from chat and context estimates when it is not set', async () => {
     const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
     const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
