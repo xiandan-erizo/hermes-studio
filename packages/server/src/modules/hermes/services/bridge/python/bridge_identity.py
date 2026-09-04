@@ -7,7 +7,8 @@ from typing import Any
 
 
 _EMAIL_MAX_CHARS = 320
-_OPTIONAL_FIELD_MAX_CHARS = 240
+_USERNAME_MAX_CHARS = 240
+_DISPLAY_NAME_MAX_CHARS = 255
 _EMAIL_PATTERN = re.compile(
     r"[A-Z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Z0-9!#$%&'*+/=?^_`{|}~-]+)*"
     r"@(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+"
@@ -57,13 +58,13 @@ def normalize_personal_chat_identity(value: Any) -> dict[str, str] | None:
     username = _normalize_text(
         value.get("username"),
         "username",
-        _OPTIONAL_FIELD_MAX_CHARS,
+        _USERNAME_MAX_CHARS,
         required=False,
     )
     display_name = _normalize_text(
         value.get("displayName"),
         "display name",
-        _OPTIONAL_FIELD_MAX_CHARS,
+        _DISPLAY_NAME_MAX_CHARS,
         required=False,
     )
     if username is not None:

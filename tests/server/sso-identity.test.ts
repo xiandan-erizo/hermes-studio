@@ -59,6 +59,23 @@ describe('OIDC identity claims', () => {
     }) as typeof fetch
   }
 
+  function mockUserInfoFailure(status = 503) {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url.endsWith('/.well-known/openid-configuration')) {
+        return new Response(JSON.stringify({
+          issuer: 'https://sso.example.test',
+          authorization_endpoint: 'https://sso.example.test/authorize',
+          token_endpoint: 'https://sso.example.test/token',
+          userinfo_endpoint: 'https://sso.example.test/userinfo',
+        }), { status: 200, headers: { 'content-type': 'application/json' } })
+      }
+      if (url === 'https://sso.example.test/userinfo') {
+        return new Response('', { status })
+      }
+      throw new Error(`Unexpected OIDC request: ${url}`)
+    }) as typeof fetch
+  }
+
   it('merges matching UserInfo profile fields into verified ID token claims', async () => {
     mockOidcResponses({ sub: 'subject-1', name: 'Bob Example', email: 'Bob@Example.com' })
     const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
@@ -96,6 +113,51 @@ describe('OIDC identity claims', () => {
       }),
       accessToken: 'access-token',
     }, 'nonce-2')).rejects.toThrow('OIDC userinfo subject mismatch')
+  })
+
+  it('falls back to complete verified ID token claims when optional UserInfo fails', async () => {
+    mockUserInfoFailure()
+    const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
+
+    await expect(oidc.resolveOidcIdentityClaims({
+      idToken: signedIdToken({
+        iss: 'https://sso.example.test',
+        aud: 'client-id',
+        exp: Math.floor(Date.now() / 1000) + 60,
+        nonce: 'nonce-complete',
+        sub: 'subject-complete',
+        preferred_username: 'bob',
+        name: 'Bob Example',
+        email: 'Bob@Example.com',
+      }),
+      accessToken: 'access-token',
+    }, 'nonce-complete')).resolves.toEqual({
+      sub: 'subject-complete',
+      username: 'bob',
+      displayName: 'Bob Example',
+      email: 'Bob@Example.com',
+    })
+  })
+
+  it('falls back to incomplete verified ID token claims when optional UserInfo fails', async () => {
+    mockUserInfoFailure()
+    const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
+
+    await expect(oidc.resolveOidcIdentityClaims({
+      idToken: signedIdToken({
+        iss: 'https://sso.example.test',
+        aud: 'client-id',
+        exp: Math.floor(Date.now() / 1000) + 60,
+        nonce: 'nonce-incomplete',
+        sub: 'subject-incomplete',
+      }),
+      accessToken: 'access-token',
+    }, 'nonce-incomplete')).resolves.toEqual({
+      sub: 'subject-incomplete',
+      username: 'subject-incomplete',
+      displayName: '',
+      email: '',
+    })
   })
 
   it('does not collapse whitespace-bearing subjects when matching UserInfo', async () => {

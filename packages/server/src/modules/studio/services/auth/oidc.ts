@@ -323,10 +323,6 @@ function mergeOidcIdentityClaims(idTokenClaims: IdTokenClaims, userInfoClaims: I
   })
 }
 
-function hasCompleteIdentityProfile(claims: OidcIdentityClaims): boolean {
-  return Boolean(claims.sub && claims.username && claims.displayName && claims.email)
-}
-
 export async function resolveOidcIdentityClaims(
   tokens: { idToken: string | null; accessToken: string | null },
   expectedNonce: string,
@@ -343,9 +339,8 @@ export async function resolveOidcIdentityClaims(
   let userInfoClaims: IdTokenClaims
   try {
     userInfoClaims = await fetchUserInfoClaims(tokens.accessToken)
-  } catch (error) {
-    if (hasCompleteIdentityProfile(identity)) return identity
-    throw error
+  } catch {
+    return identity
   }
 
   if (claimSubject(userInfoClaims.sub) !== identity.sub) {

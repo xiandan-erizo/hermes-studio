@@ -19,6 +19,14 @@ export interface PersonalChatIdentitySnapshot {
   displayName?: string
 }
 
+export type PersonalChatIdentityPolicyOrigin = 'cli' | 'global_agent' | 'workflow' | 'group_chat'
+
+/** Internal policy input resolved at a trusted server entrypoint. */
+export interface PersonalChatIdentityPolicyContext {
+  origin: PersonalChatIdentityPolicyOrigin
+  personalChatIdentity?: PersonalChatIdentitySnapshot
+}
+
 export interface HermesBackgroundContinuationContext {
   runtime: 'hermes'
   version: 1
@@ -32,6 +40,7 @@ export interface HermesBackgroundContinuationContext {
   instructions?: string
   workspace?: string | null
   reasoningEffort?: string
+  identityPolicyOrigin?: PersonalChatIdentityPolicyOrigin
   personalChatIdentity?: PersonalChatIdentitySnapshot
 }
 
@@ -86,6 +95,8 @@ export interface QueuedRun {
   workspace?: string | null
   source?: ChatRunSource
   sessionSource?: 'global_agent' | 'workflow' | 'group_chat'
+  /** Internal-only identity policy context. Never accepted from socket input. */
+  personalChatIdentityPolicy?: PersonalChatIdentityPolicyContext
   codingAgentId?: ChatCodingAgentId
   agentId?: ChatCodingAgentId
   mode?: RunMode

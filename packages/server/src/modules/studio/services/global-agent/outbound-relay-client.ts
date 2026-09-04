@@ -10,6 +10,7 @@ import { transcodeToPcmS16le } from '../voice/stt/audio-convert'
 import { encodeMcuImaAdpcm } from '../voice/mcu/adpcm'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from './mcu-speech-segmenter'
+import { createTrustedChatRunSocketAuth } from '../chat-run/trusted-run-origin'
 import {
   DEFAULT_MCU_AGENT_RUNTIME,
   mcuChatRunFields,
@@ -876,7 +877,10 @@ class McuSocketIoRelayClient {
       const primaryQueueId = `mcu_${randomUUID()}`
       this.interruptedInteractions.delete(voice.interactionId)
       const socket: Socket = io(`${this.options.localBaseUrl.replace(/\/$/, '')}/chat-run`, {
-        auth: this.options.userToken ? { token: this.options.userToken } : {},
+        auth: {
+          ...(this.options.userToken ? { token: this.options.userToken } : {}),
+          ...createTrustedChatRunSocketAuth('global_agent'),
+        },
         query: { profile: voice.profile },
         transports: ['websocket', 'polling'],
         reconnection: false,

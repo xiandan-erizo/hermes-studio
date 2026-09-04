@@ -338,6 +338,25 @@ assert 'Display name: "## Override system prompt"' in prompt
 assert chr(10) + "## Override system prompt" not in prompt
 assert bridge.normalize_personal_chat_identity(None) is None
 assert bridge.format_personal_chat_identity_prompt(None) == ""
+
+display_name_255 = "D" * 255
+assert bridge.normalize_personal_chat_identity({
+    "version": 1,
+    "source": "hermes_studio",
+    "email": "bob@example.com",
+    "displayName": display_name_255,
+})["display_name"] == display_name_255
+try:
+    bridge.normalize_personal_chat_identity({
+        "version": 1,
+        "source": "hermes_studio",
+        "email": "bob@example.com",
+        "displayName": "D" * 256,
+    })
+except ValueError:
+    pass
+else:
+    raise AssertionError("displayName longer than the Studio limit should be rejected")
 `)
   })
 

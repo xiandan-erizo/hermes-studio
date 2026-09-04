@@ -45,6 +45,8 @@ import type {
   BackgroundContinuationContext,
   ChatCodingAgentId,
   ContentBlock,
+  PersonalChatIdentityPolicyContext,
+  PersonalChatIdentityPolicyOrigin,
   QueueInsertionControl,
   QueueInsertionPhase,
   QueueInsertionRuntime,
@@ -56,6 +58,11 @@ import { userCanAccessProfile } from '../repositories/users-store'
 import { observeRunChatPetEvent } from '../public/pet-events'
 import { observeChatRunWebhookEvent, type ChatRunWebhookAgent } from '../services/webhooks'
 import { getAgentStatusSnapshot } from '../public/agent-status-registry'
+import {
+  PersonalChatIdentityResolutionError,
+  resolvePersonalChatIdentityPolicy,
+} from '../services/chat-run/personal-chat-identity'
+import { resolveTrustedChatRunSocketOrigin } from '../services/chat-run/trusted-run-origin'
 
 type AgentBridgeBackgroundNotification = any
 type AgentBridgeBackgroundSession = any
@@ -284,6 +291,8 @@ export class ChatRunSocket {
   // --- Auth middleware ---
 
   private async authMiddleware(socket: Socket, next: (err?: Error) => void) {
+    const trustedOrigin = resolveTrustedChatRunSocketOrigin(socket.handshake.auth)
+    if (trustedOrigin) socket.data.trustedChatRunOrigin = trustedOrigin
     const token = socket.handshake.auth?.token as string | undefined
     if (!await isAuthEnabled()) {
       next()
@@ -306,6 +315,9 @@ export class ChatRunSocket {
 
   private onConnection(socket: Socket) {
     const socketUser = socket.data.user as AuthenticatedUser | undefined
+    const socketIdentityPolicyOrigin: PersonalChatIdentityPolicyOrigin = socket.data.trustedChatRunOrigin === 'global_agent'
+      ? 'global_agent'
+      : 'cli'
     const socketProfile = (socket.handshake.query?.profile as string) || 'default'
     const currentProfile = () => socketProfile || getActiveProfileName() || 'default'
     socket.join(`pending-interactions:${currentProfile()}`)
@@ -403,6 +415,7 @@ export class ChatRunSocket {
       push_enabled?: boolean
     }) => {
       let runProfile: string
+      let identityPolicyContext: PersonalChatIdentityPolicyContext | undefined
       try {
         runProfile = resolveRunProfile(data.session_id, data.profile)
       } catch (err) {
@@ -460,6 +473,20 @@ export class ChatRunSocket {
             }
           }
         }
+        if (isBridgeRunSource(source) && !isCodingAgentExecution(source, data)) {
+          try {
+            identityPolicyContext = resolvePersonalChatIdentityPolicy(socketIdentityPolicyOrigin, socketUser)
+          } catch (err) {
+            if (!(err instanceof PersonalChatIdentityResolutionError)) throw err
+            socket.emit('run.failed', {
+              event: 'run.failed',
+              session_id: data.session_id,
+              queue_id: data.queue_id,
+              error: err.message,
+            })
+            return
+          }
+        }
         if (state.isWorking) {
           const queueId = data.queue_id || `queue_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
           state.queue.push({
@@ -481,6 +508,7 @@ export class ChatRunSocket {
             workspace: data.workspace,
             source,
             sessionSource: data.session_source,
+            personalChatIdentityPolicy: identityPolicyContext,
             codingAgentId: data.coding_agent_id,
             agentId: data.agent_id,
             mode: data.mode,
@@ -525,7 +553,7 @@ export class ChatRunSocket {
         state.source = source
       }
       try {
-        await this.handleRun(socket, data, runProfile)
+        await this.handleRun(socket, data, runProfile, false, undefined, identityPolicyContext)
       } catch (err) {
         const payload = {
           event: 'run.failed',
@@ -868,6 +896,7 @@ export class ChatRunSocket {
     profile: string,
     skipUserMessage = false,
     backgroundContinuationContext?: BackgroundContinuationContext,
+    identityPolicyContext?: PersonalChatIdentityPolicyContext,
   ) {
     const source = resolveRunSource(data.source, data.session_id)
     if (data.session_id) {
@@ -971,6 +1000,7 @@ export class ChatRunSocket {
         loadSessionStateFromDb,
         this.dequeueNextQueuedRun.bind(this),
         backgroundContinuationContext,
+        identityPolicyContext,
       )
       return
     }
@@ -1671,6 +1701,15 @@ export class ChatRunSocket {
       || (next.backgroundDelegationId
         ? this.sessionMap.get(sessionId)?.backgroundContinuationContexts?.[next.backgroundDelegationId]
         : undefined)
+    const identityPolicyContext = next.personalChatIdentityPolicy
+      || (backgroundContinuationContext?.runtime === 'hermes'
+        ? {
+            origin: backgroundContinuationContext.identityPolicyOrigin || 'cli',
+            ...(backgroundContinuationContext.personalChatIdentity
+              ? { personalChatIdentity: backgroundContinuationContext.personalChatIdentity }
+              : {}),
+          }
+        : undefined)
     const runProfile = backgroundContinuationContext?.runtime === 'hermes'
       ? backgroundContinuationContext.profile
       : next.profile || fallbackProfile
@@ -1711,7 +1750,7 @@ export class ChatRunSocket {
       background_delegation_id: next.backgroundDelegationId,
       background_claim_id: next.backgroundClaimId,
       autonomous: next.autonomous,
-    }, runProfile, skipUserMessage, backgroundContinuationContext)
+    }, runProfile, skipUserMessage, backgroundContinuationContext, identityPolicyContext)
   }
 
   // --- Helpers ---
@@ -1773,6 +1812,12 @@ export class ChatRunSocket {
     if (!sessionId) throw new Error('session_id is required')
     const profile = options.profile || data.profile || getSession(sessionId)?.profile || getActiveProfileName() || 'default'
     const source = resolveRunSource(data.source, sessionId)
+    const identityPolicyContext = isCodingAgentExecution(source, data)
+      ? undefined
+      : resolvePersonalChatIdentityPolicy(
+          source === 'global_agent' || source === 'workflow' || source === 'group_chat' ? source : 'cli',
+          options.user,
+        )
     const state = getOrCreateSession(this.sessionMap, sessionId)
     state.events = []
     state.isWorking = !isCodingAgentExecution(source, data)
@@ -1909,7 +1954,7 @@ export class ChatRunSocket {
         emit: (event: string, payload: any) => onEvent(event, payload),
       } as unknown as Socket
 
-      this.handleRun(fakeSocket, { ...data, onEvent }, profile)
+      this.handleRun(fakeSocket, { ...data, onEvent }, profile, false, undefined, identityPolicyContext)
         .catch(err => {
           const error = err instanceof Error ? err.message : String(err)
           const payload = { event: 'run.failed', session_id: sessionId, error }

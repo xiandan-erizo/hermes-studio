@@ -50,7 +50,8 @@ export function resolveSsoAccount(claims: SsoAccountClaims): { user: UserRecord;
         displayName: claims.displayName,
         email: claims.email,
       })
-      return { user, identity: existing }
+      const identity = findSsoIdentity('oidc', claims.sub)
+      return identity ? { user, identity } : null
     }
     return null
   }

@@ -1,8 +1,15 @@
-import type { PersonalChatIdentitySnapshot } from '../../contracts/runs/session'
+import type {
+  PersonalChatIdentityPolicyContext,
+  PersonalChatIdentityPolicyOrigin,
+  PersonalChatIdentitySnapshot,
+} from '../../contracts/runs/session'
 import type { AuthenticatedUser } from '../../public/auth'
 import { findSsoIdentityByUserId } from '../../repositories/sso-identities-store'
 
-export type { PersonalChatIdentitySnapshot } from '../../contracts/runs/session'
+export type {
+  PersonalChatIdentityPolicyContext,
+  PersonalChatIdentitySnapshot,
+} from '../../contracts/runs/session'
 
 export class PersonalChatIdentityResolutionError extends Error {
   constructor() {
@@ -29,5 +36,17 @@ export function resolvePersonalChatIdentity(
     email,
     ...(identity?.username ? { username: identity.username } : {}),
     ...(identity?.display_name ? { displayName: identity.display_name } : {}),
+  }
+}
+
+export function resolvePersonalChatIdentityPolicy(
+  origin: PersonalChatIdentityPolicyOrigin,
+  user: AuthenticatedUser | undefined,
+): PersonalChatIdentityPolicyContext {
+  return {
+    origin,
+    ...(origin === 'cli'
+      ? { personalChatIdentity: resolvePersonalChatIdentity(user) }
+      : {}),
   }
 }

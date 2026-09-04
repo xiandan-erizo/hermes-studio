@@ -53,7 +53,8 @@ import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
 import {
   PersonalChatIdentityResolutionError,
-  resolvePersonalChatIdentity,
+  resolvePersonalChatIdentityPolicy,
+  type PersonalChatIdentityPolicyContext,
   type PersonalChatIdentitySnapshot,
 } from './personal-chat-identity'
 
@@ -447,6 +448,7 @@ export async function handleBridgeRun(
   loadSessionStateFromDbFn: (sid: string, sessionMap: Map<string, SessionState>) => Promise<SessionState>,
   dequeueNextQueuedRun: (socket: Socket, sessionId: string, fallbackProfile?: string) => void,
   backgroundContinuationContext?: BackgroundContinuationContext,
+  identityPolicyContext?: PersonalChatIdentityPolicyContext,
 ) {
   const { input, session_id, instructions } = data
   const runSource = normalizeBridgeRunSource(data.source, data.session_source)
@@ -480,15 +482,20 @@ export async function handleBridgeRun(
     socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'Session is not available for this user' })
     return
   }
+  let effectiveIdentityPolicyContext: PersonalChatIdentityPolicyContext
   let personalChatIdentity: PersonalChatIdentitySnapshot | undefined
   try {
     // Group Chat and Workflow customer identity remain deferred until those
     // surfaces have their own authoritative membership semantics.
-    personalChatIdentity = callbackContext
-      ? callbackContext.personalChatIdentity
-      : runSource === 'cli'
-        ? resolvePersonalChatIdentity(socketUser)
-        : undefined
+    effectiveIdentityPolicyContext = callbackContext
+      ? {
+          origin: callbackContext.identityPolicyOrigin || (callbackContext.personalChatIdentity ? 'cli' : runSource),
+          ...(callbackContext.personalChatIdentity
+            ? { personalChatIdentity: callbackContext.personalChatIdentity }
+            : {}),
+        }
+      : identityPolicyContext || resolvePersonalChatIdentityPolicy('cli', socketUser)
+    personalChatIdentity = effectiveIdentityPolicyContext.personalChatIdentity
   } catch (err) {
     if (!(err instanceof PersonalChatIdentityResolutionError)) throw err
     socket.emit('run.failed', {
@@ -762,6 +769,7 @@ export async function handleBridgeRun(
         instructions: fullInstructions,
         workspace,
         reasoningEffort,
+        identityPolicyOrigin: effectiveIdentityPolicyContext.origin,
         personalChatIdentity,
       },
     }
@@ -1903,6 +1911,14 @@ async function applyBridgeChunkAsync(
       instructions,
       finalResponse,
       runSource,
+      personalChatIdentityPolicy: runMetadata
+        ? {
+            origin: runMetadata.originContext.identityPolicyOrigin || runSource,
+            ...(runMetadata.originContext.personalChatIdentity
+              ? { personalChatIdentity: runMetadata.originContext.personalChatIdentity }
+              : {}),
+          }
+        : undefined,
     })
   }
 
@@ -1978,6 +1994,7 @@ async function maybeEnqueueGoalContinuation(args: {
   instructions: string
   finalResponse: string
   runSource: BridgeRunSource
+  personalChatIdentityPolicy?: PersonalChatIdentityPolicyContext
 }) {
   const finalResponse = args.finalResponse || ''
   if (!finalResponse.trim()) return
@@ -2029,6 +2046,7 @@ async function maybeEnqueueGoalContinuation(args: {
     instructions: undefined,
     profile: args.profile,
     source: args.runSource === 'global_agent' ? 'global_agent' : 'cli',
+    personalChatIdentityPolicy: args.personalChatIdentityPolicy,
     goalContinuation: true,
   }
   args.state.queue.push(next)

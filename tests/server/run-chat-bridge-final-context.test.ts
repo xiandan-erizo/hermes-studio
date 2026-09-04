@@ -521,11 +521,12 @@ describe('bridge run final context usage', () => {
     ])
   })
 
-  it('starts a super admin without an SSO identity anonymously', async () => {
+  it.each(['admin', 'super_admin'] as const)('starts elevated %s without an SSO identity anonymously', async role => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
-    socket.data.user = { id: 1, username: 'admin', role: 'super_admin' }
+    socket.data.user = { id: 1, username: 'admin', role }
+    getSessionMock.mockReturnValue(null)
     const state = makeState()
     const bridge = {
       chat: vi.fn().mockResolvedValue({ run_id: 'run-admin', status: 'started' }),
@@ -553,7 +554,7 @@ describe('bridge run final context usage', () => {
     expect(bridge.contextEstimate.mock.calls[0][4]).not.toHaveProperty('personal_chat_identity')
   })
 
-  it.each(['group_chat', 'workflow'] as const)('omits personal identity for %s runs', async source => {
+  it.each(['global_agent', 'group_chat', 'workflow'] as const)('omits personal identity for trusted %s runs', async source => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
@@ -596,6 +597,8 @@ describe('bridge run final context usage', () => {
       false,
       vi.fn(),
       vi.fn(),
+      undefined,
+      { origin: source },
     )
 
     expect(bridge.chat.mock.calls[0][5]).not.toHaveProperty('personal_chat_identity')
@@ -1952,6 +1955,25 @@ describe('bridge run final context usage', () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
+    socket.data.user = { id: 42, username: 'local-user', role: 'user' }
+    getSessionMock.mockReturnValue({
+      id: 'session-1',
+      profile: 'default',
+      model: '',
+      provider: '',
+      owner_user_id: 42,
+    })
+    findSsoIdentityByUserIdMock.mockReturnValue({
+      id: 9,
+      provider: 'oidc',
+      subject: 'customer-subject',
+      username: 'customer',
+      display_name: 'Customer Name',
+      email: 'Customer@Example.com',
+      user_id: 42,
+      created_at: 1,
+      updated_at: 1,
+    })
     const state = makeState()
     const sessionMap = new Map([['session-1', state]])
     const bridge = {
@@ -1980,6 +2002,18 @@ describe('bridge run final context usage', () => {
     )
 
     expect(state.contextTokens).toBe(54321)
+    expect(bridge.contextEstimate).toHaveBeenCalledTimes(1)
+    for (const call of bridge.contextEstimate.mock.calls) {
+      expect(call[4]).toEqual(expect.objectContaining({
+        personal_chat_identity: {
+          version: 1,
+          source: 'hermes_studio',
+          email: 'customer@example.com',
+          username: 'customer',
+          displayName: 'Customer Name',
+        },
+      }))
+    }
     expect(emit).toHaveBeenCalledWith('usage.updated', expect.objectContaining({
       inputTokens: 11,
       outputTokens: 7,

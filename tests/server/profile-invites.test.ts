@@ -130,6 +130,39 @@ describe('Profile invites', () => {
     expect(identities.findSsoIdentity('oidc', 'subject-1')!.email).toBe('bob2@example.com')
     expect(identities.findSsoIdentity('oidc', 'subject-1')!.display_name).toBe('Robert Example')
   })
+
+  it('returns the refreshed identity when an existing SSO account signs in', async () => {
+    const users = await import('../../packages/server/src/modules/studio/repositories/users-store')
+    const identities = await import('../../packages/server/src/modules/studio/repositories/sso-identities-store')
+    const accounts = await import('../../packages/server/src/modules/studio/services/auth/sso-accounts')
+    const user = users.createUser({
+      username: 'sso_alice',
+      password: 'randompass',
+      role: 'user',
+      profiles: [],
+    })
+    identities.createSsoIdentity({
+      provider: 'oidc',
+      subject: 'subject-existing',
+      username: 'alice-old',
+      displayName: 'Alice Old',
+      email: 'alice-old@example.com',
+      userId: user!.id,
+    })
+
+    const resolved = accounts.resolveSsoAccount({
+      sub: 'subject-existing',
+      username: 'alice-new',
+      displayName: 'Alice New',
+      email: 'alice-new@example.com',
+    })
+
+    expect(resolved?.identity).toEqual(expect.objectContaining({
+      username: 'alice-new',
+      display_name: 'Alice New',
+      email: 'alice-new@example.com',
+    }))
+  })
 })
 
 describe('requireElevatedApi role gate', () => {
