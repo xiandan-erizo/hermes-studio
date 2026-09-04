@@ -156,7 +156,12 @@ const columns = computed<DataTableColumns<ManagedUser>>(() => [
   {
     title: t('users.username'),
     key: 'username',
-    minWidth: 140,
+    minWidth: 220,
+    render: (row) => h('div', { class: 'user-cell' }, [
+      h('div', row.username),
+      ...(row.display_name ? [h('div', { class: 'user-identity' }, row.display_name)] : []),
+      ...(row.email ? [h('div', { class: 'user-identity' }, row.email)] : []),
+    ]),
   },
   {
     title: t('users.role'),
@@ -235,7 +240,7 @@ onMounted(loadUsers)
       :loading="loading"
       :bordered="false"
       :single-line="false"
-      :scroll-x="1080"
+      :scroll-x="1160"
       size="small"
     />
 
@@ -301,5 +306,18 @@ onMounted(loadUsers)
 
 :deep(.muted) {
   color: $text-muted;
+}
+
+:deep(.user-cell) {
+  min-width: 0;
+}
+
+:deep(.user-identity) {
+  overflow: hidden;
+  color: $text-muted;
+  font-size: 12px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

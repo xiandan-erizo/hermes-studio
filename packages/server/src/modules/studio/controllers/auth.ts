@@ -30,6 +30,37 @@ import { startOutboundRelayClient, stopOutboundRelayClient } from '../public/glo
 import { getLanEndpointKind } from '../services/network/lan-discovery'
 import { getPublicSystemInfo } from '../public/system-info'
 import { config } from '../public/config'
+import { findSsoIdentityByUserId } from '../repositories/sso-identities-store'
+
+function serializeUser(user: {
+  id: number
+  username: string
+  role: UserRole
+  status: UserStatus
+  created_at: number
+  updated_at: number
+  last_login_at: number | null
+  profiles?: string[]
+  default_profile?: string | null
+}) {
+  const identity = findSsoIdentityByUserId(user.id)
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    status: user.status,
+    created_at: user.created_at,
+    updated_at: user.updated_at,
+    last_login_at: user.last_login_at,
+    ...(user.profiles ? { profiles: user.profiles, default_profile: user.default_profile || null } : {}),
+    ...(identity?.email ? { email: identity.email } : {}),
+    ...(identity?.display_name ? { display_name: identity.display_name } : {}),
+  }
+}
+
+function serializeUsers(users: Parameters<typeof serializeUser>[0][]) {
+  return users.map(serializeUser)
+}
 
 /**
  * GET /api/auth/status
@@ -56,13 +87,7 @@ export async function currentUser(ctx: Context) {
   }
   ctx.body = {
     user: {
-      id: user.id,
-      username: user.username,
-      role: user.role,
-      status: user.status,
-      created_at: user.created_at,
-      updated_at: user.updated_at,
-      last_login_at: user.last_login_at,
+      ...serializeUser(user),
       avatar: user.avatar || '',
       requiresCredentialChange: process.env.HERMES_DESKTOP === 'true'
         ? false
@@ -611,7 +636,7 @@ function validateProfiles(profiles: string[]): string | null {
  */
 export async function listManagedUsers(ctx: Context) {
   ctx.body = {
-    users: listUsers(),
+    users: serializeUsers(listUsers()),
     profiles: listProfileNamesFromDisk(),
   }
 }
@@ -672,7 +697,7 @@ export async function createManagedUser(ctx: Context) {
     defaultProfile: body.defaultProfile,
   })
   ctx.status = 201
-  ctx.body = { user, users: listUsers() }
+  ctx.body = { user: user && serializeUser(user), users: serializeUsers(listUsers()) }
 }
 
 /**
@@ -758,7 +783,8 @@ export async function updateManagedUser(ctx: Context) {
     profiles: nextRole === 'super_admin' ? [] : profiles,
     defaultProfile: body.defaultProfile,
   })
-  ctx.body = { user: findUserById(user.id), users: listUsers() }
+  const updatedUser = findUserById(user.id)
+  ctx.body = { user: updatedUser && serializeUser(updatedUser), users: serializeUsers(listUsers()) }
 }
 
 /**
@@ -787,7 +813,7 @@ export async function deleteManagedUser(ctx: Context) {
 
   await removeAllUserThemeAssets(user.id)
   deleteUser(user.id)
-  ctx.body = { success: true, users: listUsers() }
+  ctx.body = { success: true, users: serializeUsers(listUsers()) }
 }
 
 /**

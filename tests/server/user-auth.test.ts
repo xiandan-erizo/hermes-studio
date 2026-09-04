@@ -530,6 +530,42 @@ describe('user auth tables and middleware', () => {
     expect(usernameChangedCtx.body.user.requiresCredentialChange).toBe(false)
   })
 
+  it('includes the linked SSO identity in current and managed user responses', async () => {
+    const { users } = await initUsers()
+    const user = users.createUser({
+      username: 'bob',
+      password: 'secret1',
+      role: 'user',
+      status: 'active',
+      profiles: ['default'],
+    })!
+    const identities = await import('../../packages/server/src/modules/studio/repositories/sso-identities-store')
+    identities.createSsoIdentity({
+      provider: 'oidc',
+      subject: 'bob-subject',
+      username: 'bob',
+      displayName: 'Bob Example',
+      email: 'bob@example.com',
+      userId: user.id,
+    })
+    const ctrl = await import('../../packages/server/src/modules/studio/controllers/auth')
+
+    const currentCtx = { state: { user: { id: user.id } }, status: 200, body: null } as any
+    await ctrl.currentUser(currentCtx)
+    const managedCtx = { status: 200, body: null } as any
+    await ctrl.listManagedUsers(managedCtx)
+
+    expect(currentCtx.body.user).toMatchObject({
+      email: 'bob@example.com',
+      display_name: 'Bob Example',
+    })
+    expect(managedCtx.body.users).toContainEqual(expect.objectContaining({
+      id: user.id,
+      email: 'bob@example.com',
+      display_name: 'Bob Example',
+    }))
+  })
+
   it('lets super admins create regular admins with profile bindings', async () => {
     const { users } = await initUsers()
     vi.doMock('../../packages/server/src/modules/studio/public/profile-config', () => ({

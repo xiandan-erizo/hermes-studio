@@ -43,6 +43,8 @@ export interface CurrentUser {
   updated_at: number
   last_login_at: number | null
   avatar?: string
+  email?: string
+  display_name?: string
   requiresCredentialChange?: boolean
 }
 
@@ -237,6 +239,8 @@ export interface ManagedUser {
   created_at: number
   updated_at: number
   last_login_at: number | null
+  email?: string
+  display_name?: string
 }
 
 export interface ManagedUsersResponse {
