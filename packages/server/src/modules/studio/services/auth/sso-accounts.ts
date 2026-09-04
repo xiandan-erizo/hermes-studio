@@ -3,6 +3,7 @@ import { findUserById, findUserByUsername, createUser, type UserRecord } from '.
 import {
   createSsoIdentity,
   findSsoIdentity,
+  findSsoIdentityByUserId,
   updateSsoIdentityProfile,
   type SsoIdentityRecord,
 } from '../../repositories/sso-identities-store'
@@ -12,6 +13,10 @@ export interface SsoAccountClaims {
   username: string
   displayName: string
   email: string
+}
+
+export function findSsoAccountByUserId(userId: number): SsoIdentityRecord | null {
+  return findSsoIdentityByUserId(userId)
 }
 
 function deriveUsername(base: string): string {

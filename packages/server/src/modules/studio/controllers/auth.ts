@@ -30,7 +30,7 @@ import { startOutboundRelayClient, stopOutboundRelayClient } from '../public/glo
 import { getLanEndpointKind } from '../services/network/lan-discovery'
 import { getPublicSystemInfo } from '../public/system-info'
 import { config } from '../public/config'
-import { findSsoIdentityByUserId } from '../repositories/sso-identities-store'
+import { findSsoAccountByUserId } from '../services/auth/sso-accounts'
 
 function serializeUser(user: {
   id: number
@@ -43,7 +43,7 @@ function serializeUser(user: {
   profiles?: string[]
   default_profile?: string | null
 }) {
-  const identity = findSsoIdentityByUserId(user.id)
+  const identity = findSsoAccountByUserId(user.id)
   return {
     id: user.id,
     username: user.username,
