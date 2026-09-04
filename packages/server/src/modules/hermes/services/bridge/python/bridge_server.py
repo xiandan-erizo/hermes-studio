@@ -91,7 +91,6 @@ class BridgeServer:
                 source,
                 reasoning_effort,
                 background_delegation_enabled,
-                req.get("personal_chat_identity"),
             )
             if req.get("wait"):
                 timeout = float(req.get("timeout", 0) or 0)
@@ -123,7 +122,6 @@ class BridgeServer:
                 provider=req.get("provider"),
                 workspace=req.get("workspace"),
                 background_delegation_enabled=background_delegation_enabled,
-                personal_chat_identity=req.get("personal_chat_identity"),
             )
 
         if action == "provider_credentials":

@@ -7,7 +7,6 @@ const loadSessionStateFromDbMock = vi.hoisted(() => vi.fn())
 const ensureReadyMock = vi.hoisted(() => vi.fn())
 const getRuntimeStateMock = vi.hoisted(() => vi.fn())
 const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profile: string) => true))
-const findSsoIdentityByUserIdMock = vi.hoisted(() => vi.fn(() => null))
 const getSessionMock = vi.hoisted(() => vi.fn((sessionId?: string) => sessionId
   ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
   : undefined))
@@ -100,10 +99,6 @@ vi.mock('../../packages/server/src/modules/studio/repositories/users-store', () 
   userCanAccessProfile: userCanAccessProfileMock,
 }))
 
-vi.mock('../../packages/server/src/modules/studio/repositories/sso-identities-store', () => ({
-  findSsoIdentityByUserId: findSsoIdentityByUserIdMock,
-}))
-
 function makeServerHarness() {
   const handlers = new Map<string, Function>()
   const emitted: Array<{ room: string; event: string; payload: any }> = []
@@ -144,8 +139,6 @@ describe('ChatRunSocket reports when the run started', () => {
     bridgeMock.statusIfLoaded.mockReset()
     handleBridgeRunMock.mockReset()
     handleBridgeRunMock.mockResolvedValue(undefined)
-    findSsoIdentityByUserIdMock.mockReset()
-    findSsoIdentityByUserIdMock.mockReturnValue(null)
     ensureReadyMock.mockResolvedValue({
       reachable: true,
       status: 'ready',
@@ -232,70 +225,4 @@ describe('ChatRunSocket reports when the run started', () => {
     expect(resumed![1]).toMatchObject({ isWorking: true, runStartedAt: reattachedAt })
   })
 
-  it.each([
-    ['source=workflow', { source: 'workflow' }],
-    ['source=group_chat', { source: 'group_chat' }],
-    ['source=global_agent', { source: 'global_agent' }],
-    ['session_source=workflow', { session_source: 'workflow' }],
-    ['session_source=group_chat', { session_source: 'group_chat' }],
-    ['session_source=global_agent', { session_source: 'global_agent' }],
-  ])('does not let a browser-forged %s bypass personal email enforcement', async (_label, forged) => {
-    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
-    const { handlers, io, socket } = makeServerHarness()
-    socket.data.user = { id: 42, username: 'ordinary-user', role: 'user' }
-    getSessionMock.mockReturnValue(undefined)
-    const server = new ChatRunSocket(io as any)
-
-    ;(server as any).onConnection(socket)
-    await handlers.get('run')?.({ input: 'hello', session_id: 'fresh-session', ...forged })
-
-    expect(handleBridgeRunMock).not.toHaveBeenCalled()
-    expect(socket.emit.mock.calls.filter(([event]: [string]) => event === 'run.failed')).toEqual([
-      ['run.failed', expect.objectContaining({
-        session_id: 'fresh-session',
-        error: expect.stringContaining('SSO account email is required'),
-      })],
-    ])
-  })
-
-  it('leaves no busy state or queued work after personal email enforcement fails', async () => {
-    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
-    const { handlers, io, socket } = makeServerHarness()
-    socket.data.user = { id: 42, username: 'ordinary-user', role: 'user' }
-    getSessionMock.mockReturnValue(undefined)
-    const server = new ChatRunSocket(io as any)
-
-    ;(server as any).onConnection(socket)
-    await handlers.get('run')?.({ input: 'hello', session_id: 'fresh-session' })
-
-    const failures = socket.emit.mock.calls.filter(([event]: [string]) => event === 'run.failed')
-    expect(failures).toHaveLength(1)
-    expect((server as any).sessionMap.get('fresh-session')).toEqual(expect.objectContaining({
-      isWorking: false,
-      queue: [],
-    }))
-  })
-
-  it('preserves the server-authenticated global-agent Socket.IO origin', async () => {
-    const { createTrustedChatRunSocketAuth } = await import('../../packages/server/src/modules/studio/services/chat-run/trusted-run-origin')
-    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
-    const { handlers, io, socket } = makeServerHarness()
-    socket.handshake.auth = {
-      token: 'user-token',
-      ...createTrustedChatRunSocketAuth('global_agent'),
-    }
-    getSessionMock.mockReturnValue(undefined)
-    const server = new ChatRunSocket(io as any)
-    let authError: Error | undefined
-
-    await (server as any).authMiddleware(socket, (error?: Error) => { authError = error })
-    expect(authError).toBeUndefined()
-    socket.data.user = { id: 42, username: 'ordinary-user', role: 'user' }
-    ;(server as any).onConnection(socket)
-    await handlers.get('run')?.({ input: 'hello', session_id: 'global-session', source: 'global_agent' })
-
-    expect(socket.emit.mock.calls.filter(([event]: [string]) => event === 'run.failed')).toEqual([])
-    expect(handleBridgeRunMock).toHaveBeenCalledOnce()
-    expect(handleBridgeRunMock.mock.calls[0][10]).toEqual({ origin: 'global_agent' })
-  })
 })

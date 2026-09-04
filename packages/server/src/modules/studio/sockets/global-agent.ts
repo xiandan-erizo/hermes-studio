@@ -12,7 +12,6 @@ import { transcodeToPcmS16le } from '../services/voice/stt/audio-convert'
 import { decodeMcuImaAdpcm, encodeMcuImaAdpcm } from '../services/voice/mcu/adpcm'
 import { MCU_TTS_SAMPLE_RATE, mcuPromptText, mcuPromptUrl } from '../services/voice/mcu/prompts'
 import { createMcuSpeechSegmenter, normalizeMcuSpeechText } from '../services/global-agent/mcu-speech-segmenter'
-import { createTrustedChatRunSocketAuth } from '../services/chat-run/trusted-run-origin'
 import {
   mcuChatRunFields,
   normalizeMcuAgentRuntime,
@@ -563,10 +562,7 @@ export class GlobalAgentServer {
     }, { clientId: options.clientId })
 
     const socket: ClientSocket = createClientSocket(`${this.localBaseUrl}/chat-run`, {
-      auth: {
-        token: options.userToken,
-        ...createTrustedChatRunSocketAuth('global_agent'),
-      },
+      auth: { token: options.userToken },
       query: { profile: options.profile },
       transports: ['websocket', 'polling'],
       reconnection: false,

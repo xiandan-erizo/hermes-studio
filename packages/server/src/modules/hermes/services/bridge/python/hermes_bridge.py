@@ -15,7 +15,6 @@ if str(_BRIDGE_DIR) not in sys.path:
     sys.path.insert(0, str(_BRIDGE_DIR))
 
 import bridge_broker as _broker
-import bridge_identity as _identity
 import bridge_pool as _pool
 import bridge_runtime as _runtime
 import bridge_server as _server
@@ -29,7 +28,7 @@ def _export_module(module: ModuleType) -> None:
         globals().setdefault(name, value)
 
 
-for _module in (_identity, _runtime, _pool, _transport, _server, _broker):
+for _module in (_runtime, _pool, _transport, _server, _broker):
     _export_module(_module)
 
 _ORIGINAL_ENSURE_AGENT_IMPORTS = _runtime._ensure_agent_imports
@@ -89,8 +88,6 @@ _POOL_PATCH_NAMES = (
     "_load_reasoning_config",
     "_load_service_tier",
     "_mcp_tool_names_from_names",
-    "format_personal_chat_identity_prompt",
-    "normalize_personal_chat_identity",
     "_persist_execute_code_approval_choice",
     "_profile_env",
     "_profile_home",
@@ -218,7 +215,6 @@ class AgentPool(_pool.AgentPool):
         model: str | None = None,
         provider: str | None = None,
         background_delegation_enabled: bool | None = None,
-        personal_chat_identity: Any = None,
     ) -> AgentSession:
         _sync_pool_patches()
         return super().get_or_create(
@@ -227,7 +223,6 @@ class AgentPool(_pool.AgentPool):
             model,
             provider,
             background_delegation_enabled,
-            personal_chat_identity,
         )
 
     def start_chat(self, *args: Any, **kwargs: Any) -> RunRecord:
