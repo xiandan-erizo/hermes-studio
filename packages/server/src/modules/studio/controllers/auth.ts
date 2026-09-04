@@ -496,8 +496,13 @@ export async function microcontrollerLogin(ctx: Context) {
     const relayStartUrl = wantsRemoteRelay && relayUrl === remoteRelayUrl
       ? config.remoteRelay.url
       : relayUrl
-    const localBaseUrl = requestBaseUrl(ctx)
-    const machineInfo = localBaseUrl ? await localRelayMachineInfo(localBaseUrl) : undefined
+    // Internal relay callbacks must always target loopback. requestBaseUrl()
+    // is derived from the attacker-controllable Host header, and the relay
+    // client proxies privileged internal traffic (identity capabilities,
+    // chat-run bridge, voice turns) through this URL.
+    const baseUrl = `http://127.0.0.1:${config.port}`
+    const publicBaseUrl = requestBaseUrl(ctx) || baseUrl
+    const machineInfo = await localRelayMachineInfo(publicBaseUrl)
     const client = startOutboundRelayClient({
       connectionId,
       relayUrl: relayStartUrl,
@@ -505,8 +510,8 @@ export async function microcontrollerLogin(ctx: Context) {
       userToken: result.token,
       instanceId: connectionId,
       ...(normalizedDeviceCode ? { deviceCode: normalizedDeviceCode } : {}),
-      ...(localBaseUrl ? { localBaseUrl } : {}),
-      ...(machineInfo ? { machineInfo } : {}),
+      localBaseUrl: baseUrl,
+      machineInfo,
       relayProtocol: wantsRemoteRelay ? 'mcu-socket.io' : 'socket.io',
     })
     if (!client) {

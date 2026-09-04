@@ -29,6 +29,11 @@ describe('MCU login controller', () => {
 
     const schemas = await import('../../packages/server/src/modules/studio/infrastructure/database/schemas')
     schemas.initAllHermesTables()
+    const { configureSystemInfo } = await import('../../packages/server/src/modules/studio/public/system-info')
+    configureSystemInfo({
+      getAppHome: () => '/tmp/hermes-mcu-login-test-home',
+      getHermesVersion: async () => 'test',
+    })
   })
 
   async function loadModules() {
@@ -36,6 +41,7 @@ describe('MCU login controller', () => {
       ctrl: await import('../../packages/server/src/modules/studio/controllers/auth'),
       users: await import('../../packages/server/src/modules/studio/repositories/users-store'),
       auth: await import('../../packages/server/src/modules/studio/middleware/auth'),
+      config: (await import('../../packages/server/src/modules/studio/public/config')).config,
     }
   }
 
@@ -120,7 +126,7 @@ describe('MCU login controller', () => {
 
   it('returns a user token and starts the outbound relay client when url is provided', async () => {
     startOutboundRelayClientMock.mockReturnValue({ start: vi.fn() })
-    const { ctrl, users, auth } = await loadModules()
+    const { ctrl, users, auth, config } = await loadModules()
     users.createUser({
       username: 'ops',
       password: 'secret123',
@@ -157,8 +163,40 @@ describe('MCU login controller', () => {
       relayToken: 'relay-token',
       userToken: ctx.body.token,
       instanceId: 'mcu-1',
+      localBaseUrl: `http://127.0.0.1:${config.port}`,
+      machineInfo: expect.anything(),
       relayProtocol: 'socket.io',
     })
+  })
+
+  it('pins internal relay callbacks to loopback even when the Host header is malicious', async () => {
+    startOutboundRelayClientMock.mockReturnValue({ start: vi.fn() })
+    const { ctrl, users, config } = await loadModules()
+    users.createUser({
+      username: 'ops',
+      password: 'secret123',
+      role: 'admin',
+      profiles: ['default'],
+      defaultProfile: 'default',
+    })
+    const ctx = makeCtx({
+      token: 'relay-token',
+      url: 'https://relay.example.com/global-agent',
+      id: 'mcu-1',
+      account: 'ops',
+      password: 'secret123',
+    })
+    ctx.get = vi.fn((name: string) => (String(name).toLowerCase() === 'host' ? 'evil.attacker.example:8080' : ''))
+    ctx.protocol = 'http'
+
+    await ctrl.microcontrollerLogin(ctx)
+
+    expect(ctx.status).toBe(200)
+    expect(startOutboundRelayClientMock).toHaveBeenCalledTimes(1)
+    const options = startOutboundRelayClientMock.mock.calls[0][0] as Record<string, any>
+    expect(options.localBaseUrl).toBe(`http://127.0.0.1:${config.port}`)
+    expect(options.localBaseUrl).not.toContain('evil.attacker.example')
+    expect(options.machineInfo.url).toBe('http://evil.attacker.example:8080')
   })
 
   it('keeps LAN login local when remote relay is not requested', async () => {
@@ -191,7 +229,7 @@ describe('MCU login controller', () => {
     const remoteRelayUrl = 'https://api.hermes-studio.ai'
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })))
     startOutboundRelayClientMock.mockReturnValue({ start: vi.fn() })
-    const { ctrl, users } = await loadModules()
+    const { ctrl, users, config } = await loadModules()
     users.createUser({
       username: 'ops',
       password: 'secret123',
@@ -224,6 +262,8 @@ describe('MCU login controller', () => {
       userToken: ctx.body.token,
       instanceId: 'mcu-1',
       deviceCode: 'hstudio_mcu_test',
+      localBaseUrl: `http://127.0.0.1:${config.port}`,
+      machineInfo: expect.anything(),
       relayProtocol: 'mcu-socket.io',
     })
   })
