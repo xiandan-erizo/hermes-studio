@@ -30,6 +30,73 @@ describe('AgentBridgeClient background delegation requests', () => {
     }))
   })
 
+  it('forwards personal chat identity to chat and context estimates', async () => {
+    const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
+    const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
+    const request = vi.spyOn(client, 'request')
+      .mockResolvedValueOnce({
+        ok: true,
+        run_id: 'run-personal-identity',
+        session_id: 'session-personal-identity',
+        status: 'running',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        session_id: 'session-personal-identity',
+        message_count: 0,
+        tool_count: 0,
+        system_prompt_chars: 0,
+      })
+    const personalChatIdentity = {
+      version: 1,
+      source: 'hermes_studio',
+      email: 'bob@example.com',
+      username: 'bob',
+      displayName: 'Bob Example',
+    }
+
+    await client.chat('session-personal-identity', 'hello', undefined, undefined, 'default', {
+      personal_chat_identity: personalChatIdentity,
+    })
+    await client.contextEstimate('session-personal-identity', [], undefined, 'default', {
+      personal_chat_identity: personalChatIdentity,
+    })
+
+    expect(request.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      action: 'chat',
+      personal_chat_identity: personalChatIdentity,
+    }))
+    expect(request.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
+      action: 'context_estimate',
+      personal_chat_identity: personalChatIdentity,
+    }))
+  })
+
+  it('omits personal chat identity from chat and context estimates when it is not set', async () => {
+    const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
+    const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })
+    const request = vi.spyOn(client, 'request')
+      .mockResolvedValueOnce({
+        ok: true,
+        run_id: 'run-without-personal-identity',
+        session_id: 'session-without-personal-identity',
+        status: 'running',
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        session_id: 'session-without-personal-identity',
+        message_count: 0,
+        tool_count: 0,
+        system_prompt_chars: 0,
+      })
+
+    await client.chat('session-without-personal-identity', 'hello')
+    await client.contextEstimate('session-without-personal-identity', [])
+
+    expect(request.mock.calls[0]?.[0]).not.toHaveProperty('personal_chat_identity')
+    expect(request.mock.calls[1]?.[0]).not.toHaveProperty('personal_chat_identity')
+  })
+
   it('forwards recovery routes and delivery acknowledgements', async () => {
     const { AgentBridgeClient } = await import('../../packages/server/src/modules/hermes/services/bridge/client')
     const client = new AgentBridgeClient({ endpoint: 'tcp://127.0.0.1:1', connectRetryMs: 0, timeoutMs: 1 })

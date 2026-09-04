@@ -41,6 +41,14 @@ export interface AgentBridgeRequestOptions {
   serialize?: boolean
 }
 
+export interface AgentBridgePersonalChatIdentity {
+  version: 1
+  source: 'hermes_studio'
+  email: string
+  username?: string
+  displayName?: string
+}
+
 export interface AgentBridgeChatOptions {
   force_compress?: boolean
   /** Agent-session creation policy. False keeps delegate_task available but
@@ -56,6 +64,7 @@ export interface AgentBridgeChatOptions {
   /** Local patch (reasoning-effort): per-session reasoning effort override.
    * Empty/undefined = use config.yaml default. */
   reasoning_effort?: string
+  personal_chat_identity?: AgentBridgePersonalChatIdentity
 }
 
 export type AgentBridgeMessage =
@@ -524,6 +533,7 @@ export class AgentBridgeClient {
       ...(options.background_delegation_enabled !== undefined
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
+      ...(options.personal_chat_identity ? { personal_chat_identity: options.personal_chat_identity } : {}),
       // Local patch (reasoning-effort): per-session reasoning effort override.
       ...(options.reasoning_effort ? { reasoning_effort: options.reasoning_effort } : {}),
     })
@@ -534,7 +544,7 @@ export class AgentBridgeClient {
     messages: unknown[],
     instructions?: string,
     profile?: string,
-    options: Pick<AgentBridgeChatOptions, 'model' | 'provider' | 'workspace' | 'background_delegation_enabled'> = {},
+    options: Pick<AgentBridgeChatOptions, 'model' | 'provider' | 'workspace' | 'background_delegation_enabled' | 'personal_chat_identity'> = {},
   ): Promise<AgentBridgeContextEstimate> {
     return this.request<AgentBridgeContextEstimate>({
       action: 'context_estimate',
@@ -548,6 +558,7 @@ export class AgentBridgeClient {
       ...(options.background_delegation_enabled !== undefined
         ? { background_delegation_enabled: options.background_delegation_enabled }
         : {}),
+      ...(options.personal_chat_identity ? { personal_chat_identity: options.personal_chat_identity } : {}),
     })
   }
 
