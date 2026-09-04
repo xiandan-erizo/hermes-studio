@@ -293,8 +293,12 @@ function claimText(value: unknown, maxLength: number): string {
   return typeof value === 'string' ? value.trim().slice(0, maxLength) : ''
 }
 
+function claimSubject(value: unknown): string {
+  return typeof value === 'string' && value.length <= 255 ? value : ''
+}
+
 export function toIdentityClaims(claims: IdTokenClaims): OidcIdentityClaims {
-  const sub = claimText(claims.sub, 255)
+  const sub = claimSubject(claims.sub)
   const displayName = claimText(claims.name, 255)
   const email = claimText(claims.email, 255)
   const username = claimText(claims.preferred_username, 80) || displayName.slice(0, 80) || email.slice(0, 80) || sub
@@ -340,7 +344,7 @@ export async function resolveOidcIdentityClaims(
     throw error
   }
 
-  if (claimText(userInfoClaims.sub, 255) !== identity.sub) {
+  if (claimSubject(userInfoClaims.sub) !== identity.sub) {
     throw new Error('OIDC userinfo subject mismatch')
   }
   return mergeOidcIdentityClaims(idTokenClaims, userInfoClaims)

@@ -92,4 +92,21 @@ describe('OIDC identity claims', () => {
       accessToken: 'access-token',
     }, 'nonce-2')).rejects.toThrow('OIDC userinfo subject mismatch')
   })
+
+  it('does not collapse whitespace-bearing subjects when matching UserInfo', async () => {
+    mockOidcResponses({ sub: 'subject-1', name: 'Bob Example', email: 'bob@example.com' })
+    const oidc = await import('../../packages/server/src/modules/studio/services/auth/oidc')
+
+    await expect(oidc.resolveOidcIdentityClaims({
+      idToken: signedIdToken({
+        iss: 'https://sso.example.test',
+        aud: 'client-id',
+        exp: Math.floor(Date.now() / 1000) + 60,
+        nonce: 'nonce-3',
+        sub: ' subject-1 ',
+        preferred_username: 'bob',
+      }),
+      accessToken: 'access-token',
+    }, 'nonce-3')).rejects.toThrow('OIDC userinfo subject mismatch')
+  })
 })
