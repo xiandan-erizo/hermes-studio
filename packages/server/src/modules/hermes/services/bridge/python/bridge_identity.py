@@ -21,7 +21,11 @@ def _normalize_text(value: Any, field: str, max_chars: int, *, required: bool) -
         return None
     if not isinstance(value, str):
         raise ValueError(f"personal chat identity {field} must be a string")
-    if any(unicodedata.category(char).startswith("C") for char in value):
+    if any(
+        unicodedata.category(char).startswith("C")
+        or unicodedata.category(char) in {"Zl", "Zp"}
+        for char in value
+    ):
         raise ValueError(f"personal chat identity {field} contains control characters")
     normalized = value.strip()
     if not normalized:

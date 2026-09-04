@@ -1749,6 +1749,9 @@ class AgentPool:
         return record
 
     def _run_chat(self, session: AgentSession, record: RunRecord, message: Any, storage_message: Any | None = None, instructions: str | None = None, conversation_history: list[dict[str, Any]] | None = None, profile: str | None = None, force_compress: bool = False, workspace: str | None = None, source: str | None = None, reasoning_effort: str | None = None, personal_chat_identity: dict[str, str] | None = None) -> None:
+        pinned_identity = session.config.get("personal_chat_identity")
+        if isinstance(pinned_identity, dict):
+            personal_chat_identity = pinned_identity
         with _profile_env(profile):
             _refresh_approval_allowlist()
             _install_execute_code_approval_memory_patch()
@@ -1788,6 +1791,8 @@ class AgentPool:
                         personal_chat_identity,
                     )
                 except Exception:
+                    if personal_chat_identity is not None:
+                        raise
                     session_context_tokens = None
                 try:
                     self._enter_exec_ask_scope()

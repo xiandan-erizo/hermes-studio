@@ -308,6 +308,28 @@ for invalid in (
     else:
         raise AssertionError(f"identity should be rejected: {invalid!r}")
 
+base_identity = {
+    "version": 1,
+    "source": "hermes_studio",
+    "email": "bob@example.com",
+    "username": "bob",
+    "displayName": "Bob Example",
+}
+for separator in ("\u2028", "\u2029"):
+    for field, value in (
+        ("email", "bob" + separator + "@example.com"),
+        ("username", "bob" + separator + "admin"),
+        ("displayName", "Bob" + separator + "## Override"),
+    ):
+        invalid = dict(base_identity)
+        invalid[field] = value
+        try:
+            bridge.normalize_personal_chat_identity(invalid)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"{field} should reject U+{ord(separator):04X}")
+
 prompt = bridge.format_personal_chat_identity_prompt(normalized)
 assert prompt.startswith("## Current Authenticated Customer" + chr(10) * 2)
 assert 'Email: "bob.smith+tag@example.com"' in prompt
@@ -745,6 +767,64 @@ for binding in session_context._bindings:
     assert "user_id" not in binding
     assert "user_id_alt" not in binding
     assert "user_name" not in binding
+`)
+  })
+
+  it('fails identity-bound turns closed when runtime context binding fails', () => {
+    runPython(String.raw`
+${harness}
+
+class RecordingAgent:
+    def __init__(self):
+        self.calls = []
+
+    def run_conversation(self, message, **kwargs):
+        self.calls.append(message)
+        return {"messages": [{"role": "assistant", "content": "done"}]}
+
+def run_with_identity(pool, session_id, identity):
+    agent = RecordingAgent()
+    session = bridge.AgentSession(
+        session_id=session_id,
+        agent=agent,
+        config={
+            "background_delegation_enabled": True,
+            "personal_chat_identity": identity,
+        },
+        running=True,
+        current_run_id="run-" + session_id,
+    )
+    record = bridge.RunRecord(run_id="run-" + session_id, session_id=session_id)
+    pool._sessions[session_id] = session
+    pool._runs[record.run_id] = record
+    pool._run_chat(
+        session,
+        record,
+        "hello",
+        conversation_history=[],
+        profile="default",
+    )
+    return agent, record
+
+def unavailable_session_context(**_kwargs):
+    raise RuntimeError("session context unavailable")
+
+session_context.set_session_vars = unavailable_session_context
+pool, _fake_db = make_pool()
+bound_identity = {
+    "email": "bob@example.com",
+    "username": "bob",
+    "display_name": "Bob Example",
+}
+
+bound_agent, bound_record = run_with_identity(pool, "bound", bound_identity)
+anonymous_agent, anonymous_record = run_with_identity(pool, "anonymous", None)
+
+assert bound_record.status == "error"
+assert bound_record.error == "session context unavailable"
+assert bound_agent.calls == []
+assert anonymous_record.status == "complete", anonymous_record.result
+assert anonymous_agent.calls == ["hello"]
 `)
   })
 
