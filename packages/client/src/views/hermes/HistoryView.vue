@@ -140,6 +140,9 @@ const contextMenuOptions = computed<DropdownOption[]>(() => {
       key: 'import-webui',
       disabled: Boolean(contextSessionSummary.value?.webui_imported),
     },
+    ...(contextSessionSummary.value && CHANNEL_SOURCES.includes(String(contextSessionSummary.value.source || ''))
+      ? [{ label: t('chat.continueInWebUi'), key: 'continue-webui' }]
+      : []),
     { label: t(contextSessionPinned.value ? 'chat.unpin' : 'chat.pin'), key: 'pin' },
     ...(contextSessionSummary.value?.is_archived ? [{ label: t('chat.unarchiveSession'), key: 'unarchive' }] : []),
     { label: t('chat.copySessionLink'), key: 'copy-link' },
@@ -755,6 +758,21 @@ async function handleContextMenuSelect(key: string) {
     await copySessionId(contextSessionId.value)
   } else if (key === 'import-webui') {
     await handleImportToWebUi(contextSessionId.value)
+  } else if (key === 'continue-webui') {
+    const summary = contextSessionSummary.value
+    const sessionId = contextSessionId.value
+    if (!sessionId || !summary) return
+    try {
+      // Idempotent: ensures the local snapshot exists before routing to chat.
+      await importHermesSession(sessionId, summary.profile || null)
+    } catch {
+      // Already imported or transient failure — the chat view can still load.
+    }
+    await router.push({
+      name: 'hermes.session',
+      params: { sessionId },
+      query: summary.profile ? { profile: summary.profile } : undefined,
+    })
   } else if (key === 'unarchive') {
     const summary = contextSessionSummary.value
     if (!summary?.is_archived) return

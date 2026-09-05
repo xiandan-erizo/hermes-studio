@@ -1098,6 +1098,7 @@ export default {
     batchDeletePartial: '{failed} sessions failed to delete',
     batchDeleteFailed: 'Batch delete failed',
     importToWebUi: 'Import to Web UI',
+    continueInWebUi: 'Continue in Web UI',
     importSessionSuccess: 'Session imported to Web UI',
     importSessionAlreadyExists: 'Session already exists in Web UI',
     importSessionFailed: 'Failed to import session',

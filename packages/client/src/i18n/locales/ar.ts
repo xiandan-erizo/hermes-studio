@@ -1069,6 +1069,7 @@ export default {
     batchDeletePartial: 'تعذّر حذف {failed} جلسات',
     batchDeleteFailed: 'فشل الحذف المتعدد',
     importToWebUi: 'استيراد إلى واجهة الويب',
+    continueInWebUi: 'المتابعة في واجهة الويب',
     importSessionSuccess: 'تم استيراد الجلسة إلى واجهة الويب',
     importSessionAlreadyExists: 'الجلسة موجودة بالفعل في واجهة الويب',
     importSessionFailed: 'تعذّر استيراد الجلسة',

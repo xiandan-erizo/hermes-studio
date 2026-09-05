@@ -9,6 +9,8 @@
 
 import type { Server, Socket } from 'socket.io'
 import { canOperateSession } from '../services/session-access'
+import { isChannelSource } from '../repositories/external-identities-store'
+import { refreshChannelSessionFromHermes } from '../services/channel-session-refresh'
 import { randomUUID } from 'crypto'
 import { logger } from '../public/logging'
 import { getSystemPrompt } from '../public/runs/prompt'
@@ -150,6 +152,9 @@ function isHermesWorkerBackedSession(session?: { source?: string | null; agent?:
   // "api_server" is a legacy/default source value; Hermes sessions still use worker-backed runtime.
   // coding_agent runs have a separate lifecycle.
   if (!source || source === 'cli' || source === 'api_server') return true
+  // Channel conversations (feishu/dingtalk/...) are also hermes worker
+  // sessions; they can be continued from the Web UI via the bridge.
+  if (isChannelSource(source)) return true
   if (source === 'workflow' || source === 'group_chat') {
     const agent = String(session?.agent || '').trim()
     return agent !== 'claude' && agent !== 'codex' && agent !== 'pi' && agent !== 'ekko-agent' && !session?.agent_session_id
@@ -243,6 +248,11 @@ export class ChatRunSocket {
   private backgroundBridge = createPrimaryAgentBridge({ timeoutMs: 1000, connectRetryMs: 0 })
   /** sessionId → session state (messages, working status, events, run tracking) */
   private sessionMap = new Map<string, SessionState>()
+
+  /** True while a run is in flight for the session (used to defer channel refreshes). */
+  isSessionRunActive(sessionId: string): boolean {
+    return this.sessionMap.get(sessionId)?.isWorking === true
+  }
   private bridgeResumePolls = new Set<string>()
   private readonly runWaiters = new Map<string, Set<(event: string, payload: any) => void>>()
   private backgroundPollTimer?: NodeJS.Timeout
@@ -1299,6 +1309,24 @@ export class ChatRunSocket {
     sid: string,
     options?: { event: 'app.resumed'; cachedId: string },
   ) {
+    // Channel conversations are state.db snapshots; refresh before loading so
+    // turns that arrived on the channel after import are visible here.
+    const resumeDetail = getSession(sid)
+    if (
+      resumeDetail
+      && isChannelSource(String(resumeDetail.source || ''))
+      && !this.sessionMap.get(sid)?.isWorking
+    ) {
+      try {
+        const refreshed = await refreshChannelSessionFromHermes(sid, resumeDetail.profile || 'default')
+        if (refreshed && this.sessionMap.has(sid)) {
+          // Drop the stale in-memory copy so messages reload from the local DB.
+          this.sessionMap.delete(sid)
+        }
+      } catch {
+        // Non-fatal: serve the local snapshot.
+      }
+    }
     let state = this.sessionMap.get(sid)
     if (!state) {
       state = await loadSessionStateFromDb(sid, this.sessionMap)

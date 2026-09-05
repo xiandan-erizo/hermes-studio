@@ -104,4 +104,57 @@ describe('Session identity descriptor', () => {
       note: 'owner user record is missing',
     })
   })
+
+  describe('channel conversation operate access', () => {
+    it('lets the mapped user operate a channel conversation', async () => {
+      insertUser(3, 'sunkesi')
+      db.prepare("INSERT INTO external_identities (source, external_id, user_id) VALUES ('feishu', 'ou_abc', 3)").run()
+      const { canOperateSession, resolveSessionAccess } = await load()
+      const channelSession = { source: 'feishu', user_id: 'ou_abc' }
+      expect(resolveSessionAccess({ id: 3, role: 'user' }, channelSession)).toBe('read_external')
+      expect(canOperateSession({ id: 3, role: 'user' }, channelSession)).toBe(true)
+      expect(canOperateSession({ id: 1, role: 'super_admin' }, channelSession)).toBe(true)
+      expect(canOperateSession({ id: 4, role: 'user' }, channelSession)).toBe(false)
+    })
+
+    it('keeps destructive operations owner/admin-only for the mapped user', async () => {
+      insertUser(3, 'sunkesi')
+      db.prepare("INSERT INTO external_identities (source, external_id, user_id) VALUES ('feishu', 'ou_abc', 3)").run()
+      const { denySessionOperation } = await load()
+      const ctx: any = { state: { user: { id: 3, role: 'user' } }, status: 0, body: null }
+      expect(denySessionOperation(ctx, { source: 'feishu', user_id: 'ou_abc' })).toBe(true)
+      expect(ctx.status).toBe(403)
+      expect(ctx.body).toMatchObject({ error: 'Session is read-only for this account' })
+    })
+
+    it('keeps inherited external-actor rows on non-channel sessions read-only', async () => {
+      insertUser(3, 'sunkesi')
+      db.prepare("INSERT INTO external_identities (source, external_id, user_id) VALUES ('feishu', 'ou_abc', 3)").run()
+      const { canOperateSession, resolveSessionAccess } = await load()
+      const subagentRow = { source: 'subagent', external_actor_source: 'feishu', external_actor_id: 'ou_abc' }
+      expect(resolveSessionAccess({ id: 3, role: 'user' }, subagentRow)).toBe('read_external')
+      expect(canOperateSession({ id: 3, role: 'user' }, subagentRow)).toBe(false)
+    })
+  })
+
+  describe('shouldClaimSessionOwnership', () => {
+    it('claims state-less legacy sessions', async () => {
+      const { shouldClaimSessionOwnership } = await load()
+      expect(shouldClaimSessionOwnership({ source: 'cli', owner_user_id: null, ownership_state: null }, { id: 3 })).toBe(true)
+      expect(shouldClaimSessionOwnership({ source: 'api_server' }, { id: 3 })).toBe(true)
+    })
+
+    it('never claims channel conversations', async () => {
+      const { shouldClaimSessionOwnership } = await load()
+      expect(shouldClaimSessionOwnership({ source: 'feishu', user_id: 'ou_x' }, { id: 3 })).toBe(false)
+      expect(shouldClaimSessionOwnership({ source: 'dingtalk' }, { id: 1, role: 'super_admin' })).toBe(false)
+    })
+
+    it('skips owned sessions and anonymous callers', async () => {
+      const { shouldClaimSessionOwnership } = await load()
+      expect(shouldClaimSessionOwnership({ source: 'cli', owner_user_id: 3, ownership_state: 'owned' }, { id: 3 })).toBe(false)
+      expect(shouldClaimSessionOwnership({ source: 'cli' }, null)).toBe(false)
+      expect(shouldClaimSessionOwnership(null, { id: 3 })).toBe(false)
+    })
+  })
 })

@@ -1013,6 +1013,7 @@ export default {
     batchDeletePartial: '{failed} sessions ont échoué',
     batchDeleteFailed: 'Échec de la suppression par lot',
     importToWebUi: 'Importer dans Web UI',
+    continueInWebUi: 'Continuer dans Web UI',
     importSessionSuccess: 'Session importée dans Web UI',
     importSessionAlreadyExists: 'La session existe déjà dans Web UI',
     importSessionFailed: 'Échec de l’import de la session',

@@ -4,7 +4,9 @@
  */
 
 import type { Server, Socket } from 'socket.io'
-import { canOperateSession } from '../../services/session-access'
+import { canOperateSession, shouldClaimSessionOwnership } from '../../services/session-access'
+import { isChannelSource } from '../../repositories/external-identities-store'
+import { refreshChannelSessionFromHermes } from '../channel-session-refresh'
 import { getSystemPrompt } from '../../public/runs/prompt'
 import { getFirstSessionMessageByRole, getSession, getSessionMessageCountByRole, createSession, addMessage, updateSession, updateSessionStats, claimSessionOwnership } from '../../repositories/session-store'
 import { logger, bridgeLogger } from '../../public/logging'
@@ -464,16 +466,30 @@ export async function handleBridgeRun(
   let fullInstructions = callbackContext?.instructions
     || instructions
     || getSystemPrompt(undefined, { source: data.session_source || data.source })
-  const sessionRow = getSession(session_id)
-  // P0: operating an existing session requires full access (owner or
-  // super_admin). Legacy mixed-semantics user_id is never consulted.
+  let sessionRow = getSession(session_id)
+  // P0: operating an existing session requires either full access (owner /
+  // super_admin) or, for channel conversations, the Studio user the channel
+  // actor maps to. Legacy mixed-semantics user_id is never consulted.
   if (sessionRow && socketUser && !canOperateSession(socketUser, sessionRow)) {
     socket.emit('run.failed', { event: 'run.failed', queue_id: data.queue_id, error: 'Session is not available for this user' })
     return
   }
+  // Channel conversations live in state.db; local rows are an import
+  // snapshot. Refresh before running so turns that arrived on the channel
+  // after import are part of the run's context.
+  if (sessionRow && isChannelSource(String(sessionRow.source || ''))) {
+    try {
+      if (await refreshChannelSessionFromHermes(session_id, profile)) {
+        sessionRow = getSession(session_id)
+      }
+    } catch (err) {
+      bridgeLogger.warn({ err, sessionId: session_id }, '[chat-run-socket] channel session refresh failed; continuing with local snapshot')
+    }
+  }
   // Claim ownership for state-less legacy sessions started by an authorized
-  // user (the access check above already proved full access).
-  if (sessionRow && sessionRow.owner_user_id == null && sessionRow.ownership_state == null && socketUser?.id != null) {
+  // user. Channel sessions keep their external actor identity instead —
+  // shouldClaimSessionOwnership blocks the claim for them.
+  if (sessionRow && socketUser && shouldClaimSessionOwnership(sessionRow, socketUser)) {
     claimSessionOwnership(session_id, Number(socketUser.id), 'admin_claimed')
   }
   const reasoningEffort = callbackContext?.reasoningEffort ?? data.reasoning_effort ?? sessionRow?.reasoning_effort

@@ -56,6 +56,7 @@ import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
 import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities, describeSessionIdentity } from '../services/session-access'
 import { isChannelSource } from '../repositories/external-identities-store'
+import { buildImportMessages, refreshChannelSessionFromHermes } from '../services/channel-session-refresh'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -280,21 +281,6 @@ interface ProfileDefaultModel {
   provider: string
 }
 
-interface LocalImportMessage {
-  session_id: string
-  role: string
-  content: string
-  tool_call_id?: string | null
-  tool_calls?: any[] | null
-  tool_name?: string | null
-  timestamp?: number
-  token_count?: number | null
-  finish_reason?: string | null
-  reasoning?: string | null
-  reasoning_details?: string | null
-  reasoning_content?: string | null
-}
-
 function hasProfileOnDisk(profile: string): boolean {
   return listProfileNamesFromDisk().includes(profile || 'default')
 }
@@ -345,96 +331,6 @@ async function getProfileDefaultModel(profile: string): Promise<ProfileDefaultMo
     logger.warn({ err, profile }, 'Hermes Session: failed to read profile default model for import')
   }
   return { model: '', provider: '' }
-}
-
-function normalizeImportText(value: unknown): string {
-  if (value == null) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
-
-function normalizeImportNullableText(value: unknown): string | null {
-  const text = normalizeImportText(value)
-  return text ? text : null
-}
-
-function normalizeImportToolCalls(value: unknown): any[] | null {
-  if (!Array.isArray(value)) return null
-  const calls = value
-    .map((call: any) => {
-      const id = String(call?.id || '').trim()
-      const fn = call?.function && typeof call.function === 'object' ? call.function : {}
-      const name = String(fn.name || call?.name || '').trim()
-      if (!id || !name) return null
-      const rawArgs = fn.arguments ?? call?.arguments ?? {}
-      const args = typeof rawArgs === 'string' ? rawArgs : normalizeImportText(rawArgs || {})
-      return {
-        id,
-        type: String(call?.type || 'function'),
-        function: { name, arguments: args || '{}' },
-      }
-    })
-    .filter((call): call is { id: string; type: string; function: { name: string; arguments: string } } => Boolean(call))
-  return calls.length > 0 ? calls : null
-}
-
-function buildImportMessages(sessionId: string, messages: any[]): LocalImportMessage[] {
-  const result: LocalImportMessage[] = []
-  const knownToolCallIds = new Set<string>()
-
-  for (const message of messages) {
-    const role = String(message?.role || '').trim()
-    if (role !== 'user' && role !== 'assistant' && role !== 'tool') continue
-
-    const toolCalls = role === 'assistant' ? normalizeImportToolCalls(message.tool_calls) : null
-    if (toolCalls) {
-      for (const call of toolCalls) knownToolCallIds.add(call.id)
-    }
-
-    if (role === 'tool') {
-      const callId = String(message?.tool_call_id || '').trim()
-      if (!callId || !knownToolCallIds.has(callId)) continue
-      result.push({
-        session_id: sessionId,
-        role,
-        content: normalizeImportText(message?.content),
-        tool_call_id: callId,
-        tool_calls: null,
-        tool_name: normalizeImportNullableText(message?.tool_name),
-        timestamp: Number(message?.timestamp || 0),
-        token_count: message?.token_count == null ? null : Number(message.token_count),
-        finish_reason: normalizeImportNullableText(message?.finish_reason),
-        reasoning: null,
-        reasoning_details: null,
-        reasoning_content: null,
-      })
-      continue
-    }
-
-    const content = normalizeImportText(message?.content)
-    if (role === 'assistant' && !content.trim() && !toolCalls) continue
-
-    result.push({
-      session_id: sessionId,
-      role,
-      content,
-      tool_call_id: null,
-      tool_calls: toolCalls,
-      tool_name: null,
-      timestamp: Number(message?.timestamp || 0),
-      token_count: message?.token_count == null ? null : Number(message.token_count),
-      finish_reason: normalizeImportNullableText(message?.finish_reason),
-      reasoning: role === 'assistant' ? normalizeImportNullableText(message?.reasoning) : null,
-      reasoning_details: role === 'assistant' ? normalizeImportNullableText(message?.reasoning_details) : null,
-      reasoning_content: role === 'assistant' ? normalizeImportNullableText(message?.reasoning_content) : null,
-    })
-  }
-
-  return result
 }
 
 export async function listConversations(ctx: any) {
@@ -2218,6 +2114,23 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const offset = ctx.query.offset ? parseInt(ctx.query.offset as string, 10) : 0
   const limit = ctx.query.limit ? parseInt(ctx.query.limit as string, 10) : 150
   const profile = requestedProfile(ctx)
+
+  // Imported channel sessions are snapshots of the agent's state.db. Before
+  // serving messages, pull in channel turns that happened after import so the
+  // conversation can be continued with full context.
+  const localSnapshotSession = localGetSession(ctx.params.id)
+  if (
+    localSnapshotSession
+    && isChannelSource(String(localSnapshotSession.source || ''))
+    && isHermesAgentAvailable()
+    && !getChatRunServer()?.isSessionRunActive(ctx.params.id)
+  ) {
+    try {
+      await refreshChannelSessionFromHermes(ctx.params.id, profile || localSnapshotSession.profile || 'default')
+    } catch {
+      // Non-fatal: fall back to the local snapshot.
+    }
+  }
 
   const { getSessionDetailPaginated } = await import('../public/sessions')
   const localResult = getSessionDetailPaginated(ctx.params.id, offset, limit)

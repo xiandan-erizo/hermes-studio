@@ -3,8 +3,11 @@
  *
  * Profile access is checked by the HTTP/Socket caller first. Within an allowed
  * Profile, a Session is private to its creator; only super_admin may access
- * every user's Session. External channel history remains read-only when its
- * actor identity is mapped to the current Studio user.
+ * every user's Session. A channel conversation (feishu/dingtalk/...) whose
+ * actor identity maps to the current Studio user may be READ and OPERATED
+ * (runs/abort/resume — continuing the conversation in the Web UI), while
+ * destructive metadata operations (rename/delete/archive/model) stay
+ * owner/admin-only.
  *
  * `owner_user_id` is the authorization field. The legacy mixed-semantics
  * `user_id` is used only to resolve an external channel actor.
@@ -180,8 +183,28 @@ export function canReadSession(user: SessionAccessUser | null | undefined, sessi
   return resolveSessionAccess(user, session) !== 'none'
 }
 
-export function canOperateSession(user: SessionAccessUser | null | undefined, session: SessionOwnershipFields | null | undefined): boolean {
-  return resolveSessionAccess(user, session) === 'full'
+/**
+ * Ownership-claim gate for state-less legacy sessions. Channel conversations
+ * are never claimed: their identity is the external channel actor, and a
+ * claim would rewrite the conversation's identity to the operating user.
+ */
+export function shouldClaimSessionOwnership(
+  session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
+  user: SessionAccessUser | null | undefined,
+): boolean {
+  if (!session || !user) return false
+  if (session.owner_user_id != null || session.ownership_state != null) return false
+  return !isChannelSource(String(session.source || ''))
+}
+
+export function canOperateSession(user: SessionAccessUser | null | undefined, session: SessionOwnershipFields & HermesHistoryFields | null | undefined): boolean {
+  const access = resolveSessionAccess(user, session)
+  if (access === 'full') return true
+  // The Studio user a channel actor maps to may operate that conversation
+  // (continue it in the Web UI). Scoped to channel sessions only: inherited
+  // external-actor rows on subagent sessions stay read-only.
+  if (access === 'read_external' && isChannelSource(String(session?.source || ''))) return true
+  return false
 }
 
 export type DenyContext = {
