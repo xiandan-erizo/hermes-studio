@@ -318,6 +318,25 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
   }
 }
 
+const CHANNEL_SOURCES = ['feishu', 'dingtalk', 'weixin', 'wecom', 'webhook']
+const autoImportedChannelSessions = new Set<string>()
+
+/**
+ * Lazily import channel conversations (feishu/dingtalk/...) from the agent
+ * state.db into the local Web UI store when the user opens them, so the
+ * conversation monitor picks them up without a manual context-menu import.
+ * Idempotent on the server: already-imported sessions return instantly.
+ */
+function maybeAutoImportChannelSession(summary: { id: string; source?: string | null; profile?: string | null }) {
+  if (!CHANNEL_SOURCES.includes(String(summary.source || '').toLowerCase())) return
+  const key = `${summary.profile || 'default'}:${summary.id}`
+  if (autoImportedChannelSessions.has(key)) return
+  autoImportedChannelSessions.add(key)
+  void importHermesSession(summary.id, summary.profile || null).catch(() => {
+    autoImportedChannelSessions.delete(key)
+  })
+}
+
 async function handleSessionClick(sessionId: string, profile?: string | null) {
   await router.push({
     name: 'hermes.historySession',
@@ -360,6 +379,8 @@ async function syncRouteSession() {
     await router.replace({ name: 'hermes.history' })
     return
   }
+
+  maybeAutoImportChannelSession(summary)
 
   if (collapsedGroups.value.has(summary.source)) {
     collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== summary.source))
