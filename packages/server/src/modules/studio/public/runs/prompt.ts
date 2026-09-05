@@ -148,6 +148,7 @@ export const HERMES_MCP_USAGE_GUIDELINES = [
   'Use hermes_studio_api_request with method, relative path, and JSON body/query fields that match the OpenAPI requestBody and parameters. Do not call full URLs.',
   'When the user asks to use the Hermes Studio MCP browser and hermes_studio_browser_toolset is available, call it with action=list to discover browser operations, action=describe for the full schema of the needed operation, then action=call with that tool name and arguments. Browser MCP exposes a compact toolset rather than resources; an empty list_mcp_resources or list_mcp_resource_templates result does not mean the browser toolset is unavailable.',
   'Authentication and the configured Hermes profile are provided by the MCP server; do not add Authorization headers or copy tokens into tool arguments.',
+  'When you need to know who the current user is (for example to fill in the requester or reporter when creating a ticket, record, or request on their behalf), call hermes_studio_use_whoami with the current chat session id.',
   'Do not use hermes_studio_use_chat_run, Hermes Studio session tools, /api/studio/chat-run/*, or /api/studio/sessions/* as an internal delegation mechanism. In delegate_task, subtask, or workflow-node contexts, do not create, rename, delete, or continue Hermes Studio sessions unless the user explicitly asked to operate Hermes Studio sessions; return the delegated result in the current task instead.',
 ];
 

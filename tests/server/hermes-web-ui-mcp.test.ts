@@ -363,6 +363,14 @@ describe('hermes-web-ui MCP server', () => {
         res.end(JSON.stringify({ id: 'session-1', title: 'Session 1' }))
         return
       }
+      if (req.url === '/api/studio/sessions/session-1/identity') {
+        res.end(JSON.stringify({
+          session_id: 'session-1',
+          source: 'cli',
+          identity: { kind: 'user', user_id: 3, username: 'sunkesi', email: 'sunkesi@hosecloud.com' },
+        }))
+        return
+      }
       if (req.url === '/api/studio/sessions/session-1/context') {
         res.end(JSON.stringify({
           session_id: 'session-1',
@@ -541,6 +549,10 @@ describe('hermes-web-ui MCP server', () => {
         arguments: { source: 'coding_agent' },
       },
     })
+    writeRpc(child, 36, 'tools/call', {
+      name: 'hermes_studio_use_whoami',
+      arguments: { session_id: 'session-1' },
+    })
     writeRpc(child, 3, 'tools/call', {
       name: 'hermes_studio_use_chat_run',
       arguments: { input: 'hello', session_id: 'session-1', include_events: true },
@@ -684,7 +696,7 @@ describe('hermes-web-ui MCP server', () => {
     expect(list.result.tools[0].description).toContain('internal delegation')
 
     const catalog = JSON.parse((await waitForRpc(responses, 32)).result.content[0].text)
-    expect(catalog).toMatchObject({ toolset: 'use', operation_count: 25 })
+    expect(catalog).toMatchObject({ toolset: 'use', operation_count: 26 })
     expect(catalog.operations.map((tool: any) => tool.name)).toEqual(expect.arrayContaining([
       'hermes_studio_use_chat_run',
       'hermes_studio_use_sessions_count',
@@ -706,6 +718,8 @@ describe('hermes-web-ui MCP server', () => {
     }
     const gatewaySessionCount = JSON.parse((await waitForRpc(responses, 35)).result.content[0].text)
     expect(gatewaySessionCount.count).toBe(7)
+    const whoami = JSON.parse((await waitForRpc(responses, 36)).result.content[0].text)
+    expect(whoami.identity).toMatchObject({ kind: 'user', email: 'sunkesi@hosecloud.com' })
 
     const chatRun = JSON.parse((await waitForRpc(responses, 3)).result.content[0].text)
     expect(chatRun.body).toMatchObject({ input: 'hello', session_id: 'session-1', include_events: true })

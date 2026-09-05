@@ -16,6 +16,7 @@ const importHermesSessionMock = vi.fn(async (ctx: any) => { ctx.body = { session
 const searchMock = vi.fn(async (ctx: any) => { ctx.body = { results: [{ id: 'search-1' }] } })
 const getMock = vi.fn(async (ctx: any) => { ctx.body = { session: { id: ctx.params.id } } })
 const getContextMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id, messages: [] } })
+const getSessionIdentityMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id, identity: { kind: 'anonymous' } } })
 const removeMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 const renameMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
 const archiveMock = vi.fn(async (ctx: any) => { ctx.body = { ok: true } })
@@ -64,6 +65,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   search: searchMock,
   get: getMock,
   getContext: getContextMock,
+  getSessionIdentity: getSessionIdentityMock,
   remove: removeMock,
   batchRemove: batchRemoveMock,
   rename: renameMock,
@@ -254,6 +256,16 @@ describe('session routes', () => {
     expect(listHermesSessionGroupsMock).toHaveBeenCalledWith(ctx)
     expect(getHermesSessionMock).not.toHaveBeenCalled()
     expect(ctx.body).toEqual({ groups: [] })
+  })
+
+  it('delegates session identity route to the controller', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    const layer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/:id/identity')
+    expect(layer).toBeTruthy()
+    const handler = layer.stack[0]
+    const ctx: any = { query: {}, body: null, params: { id: 'session-1' } }
+    await handler(ctx)
+    expect(getSessionIdentityMock).toHaveBeenCalledWith(ctx)
   })
 
   it('delegates session context route to the controller', async () => {

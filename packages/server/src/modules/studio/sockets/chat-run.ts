@@ -947,6 +947,9 @@ export class ChatRunSocket {
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source })}\n${data.instructions}`
         : getSystemPrompt(undefined, { source })
+      if (data.session_id) {
+        fullInstructions = `Current chat session id: ${data.session_id}.\n${fullInstructions}`
+      }
 
       const onEvent = (event: string, payload: any) => {
         if (data.session_id) this.observeQueueInsertionRunEvent(data.session_id, event, payload)

@@ -54,7 +54,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities } from '../services/session-access'
+import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities, describeSessionIdentity } from '../services/session-access'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -1234,6 +1234,51 @@ export async function getHermesSession(ctx: any) {
   }
   if (denySessionAccess(ctx, session)) return
   ctx.body = { session: { ...session, push_enabled: 0 } }
+}
+
+/**
+ * Verified identity bound to a chat session, for agents acting on the user's
+ * behalf (e.g. filling in the requester when creating tickets or records).
+ * GET /api/studio/sessions/:id/identity
+ */
+export async function getSessionIdentity(ctx: any) {
+  const profile = requestedProfile(ctx)
+
+  let session: any = null
+  const localSession = localGetSessionDetail(ctx.params.id)
+  const localSessionProfile = (localSession?.profile || 'default') as string
+  if (localSession && isHermesHistorySessionSource(localSession.source) && (!profile || localSessionProfile === profile)) {
+    session = localSession
+  }
+
+  if (!session && isHermesAgentAvailable()) {
+    try {
+      const detail = profile
+        ? await getHermesSessionDetailForProfile(ctx.params.id, profile)
+        : await getHermesSessionDetail(ctx.params.id)
+      if (detail && isHermesHistorySessionSource(detail.source)) session = detail
+    } catch (err) {
+      logger.warn(err, 'Hermes Session DB: identity lookup failed')
+    }
+  }
+
+  if (!session) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+
+  const enriched = await enrichWithAncestorIdentity(
+    { ...session, ...(profile ? { profile } : {}) },
+    profile || undefined,
+  )
+  if (denySessionAccess(ctx, enriched)) return
+  ctx.body = {
+    session_id: String(ctx.params.id),
+    source: enriched.source || null,
+    profile: profile || enriched.profile || null,
+    identity: describeSessionIdentity(enriched),
+  }
 }
 
 export async function importHermesSession(ctx: any) {

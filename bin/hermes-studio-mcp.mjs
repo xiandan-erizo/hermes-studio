@@ -1140,6 +1140,21 @@ const tools = [
       }, ['session_id']),
   },
   {
+    name: 'hermes_studio_use_whoami',
+    toolset: 'use',
+    description: 'Get the verified identity of the user who owns the current chat session. Pass the current session id. Use this when you need to know who you are talking to, for example to fill in the requester or reporter when creating a ticket, record, or request on the user\'s behalf.',
+    inputSchema: inputSchema({
+        session_id: {
+          type: 'string',
+          description: 'Current chat session id.',
+        },
+        profile: {
+          type: 'string',
+          description: 'Optional Hermes profile name. When omitted, the active MCP profile is used.',
+        },
+      }, ['session_id']),
+  },
+  {
     name: 'hermes_studio_use_session_delete',
     toolset: 'use',
     description: 'Delete one Hermes Studio session by id for an explicit user-requested session operation. Do not use this as an internal delegation mechanism.',
@@ -1860,6 +1875,8 @@ async function callTool(name, args = {}) {
         await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}/context`, withAuthArgs(args)),
         args,
       ))
+    case 'hermes_studio_use_whoami':
+      return jsonText(await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}/identity`, withAuthArgs(args)))
     case 'hermes_studio_use_session_delete':
       return jsonText(await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}`, withAuthArgs(args, {
         method: 'DELETE',

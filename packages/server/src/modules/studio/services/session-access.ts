@@ -19,6 +19,7 @@ export interface HermesHistoryFields {
 export type SessionAccess = 'full' | 'read_external' | 'none'
 
 import { findMappedUserId, isChannelSource } from '../repositories/external-identities-store'
+import { findSsoIdentityByUserId } from '../repositories/sso-identities-store'
 import { findUserById } from '../repositories/users-store'
 
 export interface SessionAccessUser {
@@ -67,6 +68,100 @@ export function externalActorOf(
     return { source: String(session.source).toLowerCase(), externalId: String(session.user_id).trim() }
   }
   return null
+}
+
+export interface SessionIdentitySsoDescriptor {
+  provider: string
+  subject: string
+  username: string | null
+  display_name: string | null
+  email: string | null
+}
+
+export interface SessionIdentityDescriptor {
+  kind: 'user' | 'channel_user' | 'channel' | 'anonymous'
+  user_id?: number
+  username?: string | null
+  display_name?: string | null
+  email?: string | null
+  role?: string | null
+  channel?: { source: string; external_id: string }
+  sso?: SessionIdentitySsoDescriptor | null
+  note?: string
+}
+
+function emailHintFor(username: string | null | undefined): string | null {
+  const value = String(username || '').trim()
+  return value.includes('@') ? value : null
+}
+
+function ssoDescriptorOf(userId: number): SessionIdentitySsoDescriptor | null {
+  const sso = findSsoIdentityByUserId(userId)
+  if (!sso) return null
+  return {
+    provider: String(sso.provider),
+    subject: String(sso.subject),
+    username: sso.username || null,
+    display_name: sso.display_name || null,
+    email: sso.email || null,
+  }
+}
+
+/**
+ * Verified identity bound to a session: the owner user (with SSO profile
+ * fields), the Studio user an external channel actor maps to, or the raw
+ * channel actor when unmapped. Anonymous when nothing is bound.
+ */
+export function describeSessionIdentity(
+  session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
+): SessionIdentityDescriptor {
+  if (!session) return { kind: 'anonymous', note: 'session has no bound identity' }
+  if (session.owner_user_id != null) {
+    const owner = findUserById(Number(session.owner_user_id))
+    if (!owner) {
+      return {
+        kind: 'user',
+        user_id: Number(session.owner_user_id),
+        username: null,
+        display_name: null,
+        email: null,
+        role: null,
+        sso: null,
+        note: 'owner user record is missing',
+      }
+    }
+    const sso = ssoDescriptorOf(Number(owner.id))
+    return {
+      kind: 'user',
+      user_id: Number(owner.id),
+      username: owner.username,
+      display_name: sso?.display_name || null,
+      email: sso?.email || emailHintFor(owner.username),
+      role: owner.role || null,
+      sso,
+      ...(owner.status !== 'active' ? { note: 'owner user is not active' } : {}),
+    }
+  }
+  const actor = externalActorOf(session)
+  if (actor) {
+    const channel = { source: actor.source, external_id: actor.externalId }
+    const mapped = resolveExternalActorUser(session)
+    if (mapped) {
+      const owner = findUserById(Number(mapped.id))
+      const sso = owner ? ssoDescriptorOf(Number(owner.id)) : null
+      return {
+        kind: 'channel_user',
+        channel,
+        user_id: Number(mapped.id),
+        username: owner?.username || null,
+        display_name: sso?.display_name || null,
+        email: sso?.email || emailHintFor(owner?.username),
+        sso,
+      }
+    }
+    return { kind: 'channel', channel, note: 'external actor is not mapped to a Studio user' }
+  }
+  return { kind: 'anonymous', note: 'session has no bound identity' }
 }
 
 export function resolveSessionAccess(
