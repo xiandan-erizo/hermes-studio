@@ -85,7 +85,13 @@ async function loadHermesSessions() {
     for (const session of result.included) {
       sessionsByKey.set(`${session.profile || 'default'}\u0000${session.id}`, session)
     }
-    hermesSessions.value = [...sessionsByKey.values()]
+    hermesSessions.value = [...sessionsByKey.values()]// Hide ended channel sessions that never produced a message (event-triggered
+    // shells such as feishu reactions); keep active ones to avoid racing a live run.
+    .filter(s =>
+      !CHANNEL_SOURCES.includes(String(s.source || '').toLowerCase())
+      || (s.message_count || 0) > 0
+      || !s.ended_at,
+    )
     sourceHasMore.value = Object.fromEntries(result.groups.map(group => [group.source, group.hasMore]))
     sourceOffsets.value = Object.fromEntries(result.groups.map(group => [group.source, group.sessions.length]))
     sourceLoading.value = {}
@@ -608,7 +614,13 @@ async function loadMoreGroup(source: string) {
     for (const session of page.sessions) {
       sessionsByKey.set(`${session.profile || 'default'}\u0000${session.id}`, session)
     }
-    hermesSessions.value = [...sessionsByKey.values()]
+    hermesSessions.value = [...sessionsByKey.values()]// Hide ended channel sessions that never produced a message (event-triggered
+    // shells such as feishu reactions); keep active ones to avoid racing a live run.
+    .filter(s =>
+      !CHANNEL_SOURCES.includes(String(s.source || '').toLowerCase())
+      || (s.message_count || 0) > 0
+      || !s.ended_at,
+    )
     sourceOffsets.value = {
       ...sourceOffsets.value,
       [source]: offset + page.sessions.length,
