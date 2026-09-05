@@ -2255,6 +2255,53 @@ describe('session conversations controller', () => {
     expect(ctx.body).toMatchObject({ ok: true, imported: true })
   })
 
+  it('preserves the channel source and actor id when importing a channel session', async () => {
+    const hermesDetail = {
+      id: '20260825_164529_feishu1',
+      source: 'feishu',
+      user_id: 'ou_feishu_open_id',
+      model: 'gpt-5',
+      title: 'Feishu chat',
+      started_at: 100,
+      ended_at: 200,
+      end_reason: null,
+      message_count: 1,
+      tool_call_count: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+      reasoning_tokens: 0,
+      billing_provider: null,
+      estimated_cost_usd: 0,
+      actual_cost_usd: null,
+      cost_status: '',
+      preview: 'feishu hello',
+      last_active: 200,
+      thread_session_count: 1,
+      messages: [
+        { id: 1, session_id: '20260825_164529_feishu1', role: 'user', content: 'feishu hello', tool_call_id: null, tool_calls: null, tool_name: null, timestamp: 100, token_count: null, finish_reason: null, reasoning: null },
+      ],
+    }
+    localGetSessionDetailMock.mockReturnValueOnce(null).mockReturnValueOnce({ ...hermesDetail, profile: 'default' })
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue(hermesDetail)
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = { params: { id: '20260825_164529_feishu1' }, query: {}, state: { user: { id: 1, role: 'super_admin' } }, body: null }
+
+    await mod.importHermesSession(ctx)
+
+    expect(localCreateSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      id: '20260825_164529_feishu1',
+      source: 'feishu',
+    }))
+    expect(localUpdateSessionMock).toHaveBeenCalledWith('20260825_164529_feishu1', expect.objectContaining({
+      source: 'feishu',
+      user_id: 'ou_feishu_open_id',
+    }))
+    expect(ctx.body).toMatchObject({ ok: true, imported: true })
+  })
+
   describe('exportSession', () => {
     it('returns session as JSON download with correct headers (full mode)', async () => {
       const sessionData = { id: 'abc-123', title: 'Test Session', messages: [{ id: 1, role: 'user', content: 'hello' }] }

@@ -1324,7 +1324,7 @@ export async function importHermesSession(ctx: any) {
   localCreateSession({
     id: detail.id,
     profile,
-    source: 'cli',
+    source: detail.source || 'cli',
     model: profileDefault.model,
     provider: profileDefault.provider,
     title: detail.title || undefined,
@@ -1332,7 +1332,7 @@ export async function importHermesSession(ctx: any) {
   })
 
   localUpdateSession(detail.id, {
-    source: 'cli',
+    source: detail.source || 'cli',
     user_id: detail.user_id,
     model: profileDefault.model,
     provider: profileDefault.provider,
