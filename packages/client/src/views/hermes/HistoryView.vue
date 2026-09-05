@@ -70,6 +70,16 @@ function openNewChatPage() {
   void router.push({ name: 'hermes.chat' })
 }
 
+/**
+ * Hide ended channel sessions that never produced a message (event-triggered
+ * shells such as feishu reactions); keep active ones to avoid racing a live run.
+ */
+function shouldDisplayHistorySession(session: { source?: string | null; message_count?: number; ended_at?: number | null }): boolean {
+  return !CHANNEL_SOURCES.includes(String(session.source || '').toLowerCase())
+    || (session.message_count || 0) > 0
+    || !session.ended_at
+}
+
 async function loadHermesSessions() {
   const requestId = ++hermesSessionsRequestId
   hermesSessionsLoading.value = true
@@ -85,13 +95,7 @@ async function loadHermesSessions() {
     for (const session of result.included) {
       sessionsByKey.set(`${session.profile || 'default'}\u0000${session.id}`, session)
     }
-    hermesSessions.value = [...sessionsByKey.values()]// Hide ended channel sessions that never produced a message (event-triggered
-    // shells such as feishu reactions); keep active ones to avoid racing a live run.
-    .filter(s =>
-      !CHANNEL_SOURCES.includes(String(s.source || '').toLowerCase())
-      || (s.message_count || 0) > 0
-      || !s.ended_at,
-    )
+    hermesSessions.value = [...sessionsByKey.values()].filter(shouldDisplayHistorySession)
     sourceHasMore.value = Object.fromEntries(result.groups.map(group => [group.source, group.hasMore]))
     sourceOffsets.value = Object.fromEntries(result.groups.map(group => [group.source, group.sessions.length]))
     sourceLoading.value = {}
@@ -614,13 +618,7 @@ async function loadMoreGroup(source: string) {
     for (const session of page.sessions) {
       sessionsByKey.set(`${session.profile || 'default'}\u0000${session.id}`, session)
     }
-    hermesSessions.value = [...sessionsByKey.values()]// Hide ended channel sessions that never produced a message (event-triggered
-    // shells such as feishu reactions); keep active ones to avoid racing a live run.
-    .filter(s =>
-      !CHANNEL_SOURCES.includes(String(s.source || '').toLowerCase())
-      || (s.message_count || 0) > 0
-      || !s.ended_at,
-    )
+    hermesSessions.value = [...sessionsByKey.values()].filter(shouldDisplayHistorySession)
     sourceOffsets.value = {
       ...sourceOffsets.value,
       [source]: offset + page.sessions.length,

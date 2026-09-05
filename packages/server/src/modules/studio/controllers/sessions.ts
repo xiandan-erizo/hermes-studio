@@ -55,6 +55,7 @@ import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
 import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities, describeSessionIdentity } from '../services/session-access'
+import { isChannelSource } from '../repositories/external-identities-store'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
 import { isSensitivePath, MAX_DOWNLOAD_SIZE, MAX_EDIT_SIZE } from '../services/files/file-policy'
@@ -1328,7 +1329,11 @@ export async function importHermesSession(ctx: any) {
     model: profileDefault.model,
     provider: profileDefault.provider,
     title: detail.title || undefined,
-    owner_user_id: ctx.state?.user?.id ?? null,
+    // Channel sessions keep their external actor (source + user_id) as the
+    // identity; assigning the importing user as owner would make them the
+    // requester in identity lookups and grant full access to a conversation
+    // that should stay read-only for the mapped channel user.
+    owner_user_id: isChannelSource(detail.source || 'cli') ? null : ctx.state?.user?.id ?? null,
   })
 
   localUpdateSession(detail.id, {

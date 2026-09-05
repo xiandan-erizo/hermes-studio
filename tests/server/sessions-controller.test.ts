@@ -2294,6 +2294,7 @@ describe('session conversations controller', () => {
     expect(localCreateSessionMock).toHaveBeenCalledWith(expect.objectContaining({
       id: '20260825_164529_feishu1',
       source: 'feishu',
+      owner_user_id: null, // channel sessions keep their external actor as identity
     }))
     expect(localUpdateSessionMock).toHaveBeenCalledWith('20260825_164529_feishu1', expect.objectContaining({
       source: 'feishu',

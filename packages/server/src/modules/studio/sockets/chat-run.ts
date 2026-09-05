@@ -947,8 +947,9 @@ export class ChatRunSocket {
       let fullInstructions = data.instructions
         ? `${getSystemPrompt(undefined, { source })}\n${data.instructions}`
         : getSystemPrompt(undefined, { source })
-      if (data.session_id) {
-        fullInstructions = `Current chat session id: ${data.session_id}.\n${fullInstructions}`
+      const instructionSessionId = typeof data.session_id === 'string' ? data.session_id.trim() : ''
+      if (instructionSessionId && /^[A-Za-z0-9_-]{1,128}$/.test(instructionSessionId)) {
+        fullInstructions = `Current chat session id: ${JSON.stringify(instructionSessionId)}.\n${fullInstructions}`
       }
 
       const onEvent = (event: string, payload: any) => {
