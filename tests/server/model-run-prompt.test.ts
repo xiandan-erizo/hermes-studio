@@ -40,4 +40,23 @@ describe('model run prompt', () => {
 
     expect(existsSync(modelRunProfileTokenPath('research'))).toBe(false)
   })
+
+  it('stores different model-run tokens for concurrent sessions in one profile', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-model-run-prompt-'))
+    homes.push(home)
+    process.env.HERMES_WEB_UI_HOME = home
+    issueModelRunJwtMock
+      .mockResolvedValueOnce('session-a-token')
+      .mockResolvedValueOnce('session-b-token')
+
+    const { writeModelRunSessionToken, modelRunSessionTokenPath } = await import('../../packages/server/src/modules/studio/services/chat-run/model-run-prompt')
+    await writeModelRunSessionToken({ id: 3, username: 'alice', role: 'user' }, 'default', 'session-a')
+    await writeModelRunSessionToken({ id: 4, username: 'bob', role: 'user' }, 'default', 'session-b')
+
+    const sessionAPath = modelRunSessionTokenPath('default', 'session-a')
+    const sessionBPath = modelRunSessionTokenPath('default', 'session-b')
+    expect(sessionAPath).not.toBe(sessionBPath)
+    expect(readFileSync(sessionAPath, 'utf-8').trim()).toBe('session-a-token')
+    expect(readFileSync(sessionBPath, 'utf-8').trim()).toBe('session-b-token')
+  })
 })

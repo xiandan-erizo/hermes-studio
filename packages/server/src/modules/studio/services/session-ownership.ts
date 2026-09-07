@@ -20,7 +20,7 @@
  * and creation-time writes set owners.
  */
 
-export const SESSION_OWNERSHIP_MIGRATION_VERSION = 1
+export const SESSION_OWNERSHIP_MIGRATION_VERSION = 2
 export const SESSION_OWNERSHIP_MIGRATION_ID = 'session-ownership-v1'
 
 /** Explicitly verified legacy mappings (session id -> Studio user id).
@@ -38,7 +38,7 @@ const VERIFIED_OWNER_MAPPINGS: Record<string, number> = {
 const EXTERNAL_SOURCES = new Set(['feishu', 'dingtalk', 'weixin', 'wecom', 'webhook'])
 
 export type OwnershipState = 'owned' | 'external' | 'unresolved'
-export type OwnershipResolution = 'created' | 'migration_verified' | 'imported' | 'admin_claimed'
+export type OwnershipResolution = 'created' | 'migration_verified' | 'migration_external' | 'imported' | 'admin_claimed'
 
 export interface OwnershipClassification {
   state: OwnershipState
@@ -135,6 +135,21 @@ export function migrateSessionOwnership(db: MinimalDb): OwnershipMigrationSummar
   db.exec('BEGIN')
   try {
     for (const row of rows) {
+      const verdict = classifyLegacySession(row)
+      // Channel provenance is authoritative. Older imports assigned the
+      // importing Studio user as owner, which incorrectly granted destructive
+      // access and hid the external actor from identity resolution.
+      if (verdict.state === 'external') {
+        db.prepare(
+          `UPDATE sessions SET owner_user_id = NULL, external_actor_source = ?, external_actor_id = ?,
+             ownership_state = 'external', ownership_resolution = 'migration_external',
+             ownership_migration_version = ? WHERE id = ?`,
+        ).run(verdict.externalActorSource ?? null, verdict.externalActorId ?? null,
+          SESSION_OWNERSHIP_MIGRATION_VERSION, row.id)
+        summary.external += 1
+        summary.migrated += 1
+        continue
+      }
       // Never overwrite an existing owner (e.g. manually claimed, or created
       // with an owner by new code).
       if (row.ownership_state === 'owned' || row.owner_user_id != null) {
@@ -145,7 +160,6 @@ export function migrateSessionOwnership(db: MinimalDb): OwnershipMigrationSummar
         continue
       }
 
-      const verdict = classifyLegacySession(row)
       if (verdict.state === 'owned') {
         db.prepare(
           `UPDATE sessions SET owner_user_id = ?, ownership_state = 'owned',
@@ -153,14 +167,6 @@ export function migrateSessionOwnership(db: MinimalDb): OwnershipMigrationSummar
            WHERE id = ?`,
         ).run(verdict.verifiedOwnerUserId ?? null, SESSION_OWNERSHIP_MIGRATION_VERSION, row.id)
         summary.owned += 1
-      } else if (verdict.state === 'external') {
-        db.prepare(
-          `UPDATE sessions SET external_actor_source = ?, external_actor_id = ?,
-             ownership_state = 'external', ownership_migration_version = ?
-           WHERE id = ?`,
-        ).run(verdict.externalActorSource ?? null, verdict.externalActorId ?? null,
-          SESSION_OWNERSHIP_MIGRATION_VERSION, row.id)
-        summary.external += 1
       } else {
         db.prepare(
           `UPDATE sessions SET ownership_state = 'unresolved', ownership_migration_version = ?

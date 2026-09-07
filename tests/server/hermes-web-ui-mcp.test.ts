@@ -1,5 +1,6 @@
 import { createServer } from 'http'
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
+import { createHash } from 'crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
@@ -33,6 +34,11 @@ function expectProviderSafeToolNames(serverName: string, tools: Array<{ name: st
     .map(tool => `mcp__${safeServerName}__${tool.name}`)
     .filter(name => name.length > 64)
   expect(overlongNames).toEqual([])
+}
+
+function sessionTokenFile(home: string, profile: string, sessionId: string): string {
+  const digest = createHash('sha256').update(sessionId).digest('hex')
+  return join(home, 'profiles', profile, '.model-run-tokens', `${digest}.jwt`)
 }
 
 describe('hermes-web-ui MCP server', () => {
@@ -318,6 +324,115 @@ describe('hermes-web-ui MCP server', () => {
 
     expect(code).toBe(0)
     expect(stdout.trim()).toBe(`hermes-studio-mcp v${pkg.version}`)
+  })
+
+  it('selects the model-run token from trusted MCP session metadata', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-web-ui-mcp-session-token-'))
+    homes.push(home)
+    mkdirSync(join(home, 'profiles', 'research', '.model-run-tokens'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'research', '.model-run-token'), 'wrong-shared-token\n')
+    writeFileSync(sessionTokenFile(home, 'research', 'session-a'), 'session-a-token\n')
+    writeFileSync(sessionTokenFile(home, 'research', 'session-b'), 'session-b-token\n')
+    const authorizations: string[] = []
+    const profiles: string[] = []
+    const server = createServer((req, res) => {
+      authorizations.push(String(req.headers.authorization || ''))
+      profiles.push(String(req.headers['x-hermes-profile'] || ''))
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ count: 1 }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('expected TCP server address')
+
+    const responses = new Map<number, any>()
+    child = spawn(process.execPath, ['bin/hermes-studio-mcp.mjs', 'use'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`,
+        HERMES_WEB_UI_HOME: home,
+        HERMES_WEB_UI_PROFILE: 'research',
+        AUTH_TOKEN: '',
+      },
+    })
+    child.stdout.on('data', (chunk) => {
+      for (const line of String(chunk).trim().split('\n')) {
+        if (!line) continue
+        const message = JSON.parse(line)
+        responses.set(message.id, message)
+      }
+    })
+
+    writeRpc(child, 81, 'tools/call', {
+      name: 'hermes_studio_use_sessions_count',
+      arguments: { profile: 'other-profile' },
+      _meta: { 'ai.hermes/session-id': 'session-a' },
+    })
+    await waitForRpc(responses, 81)
+    writeRpc(child, 82, 'tools/call', {
+      name: 'hermes_studio_use_sessions_count',
+      arguments: {},
+      _meta: { 'ai.hermes/session-id': 'session-b' },
+    })
+    await waitForRpc(responses, 82)
+    writeRpc(child, 84, 'tools/call', {
+      name: 'hermes_studio_use_sessions_count',
+      arguments: {},
+      _meta: { 'ai.hermes/session-id': 'session-without-token' },
+    })
+    await waitForRpc(responses, 84)
+
+    expect(authorizations).toEqual(['Bearer session-a-token', 'Bearer session-b-token', ''])
+    expect(profiles).toEqual(['research', 'research', 'research'])
+    await new Promise<void>(resolve => server.close(() => resolve()))
+  })
+
+  it('rejects a whoami target that differs from trusted MCP session metadata', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'hermes-web-ui-mcp-session-token-'))
+    homes.push(home)
+    mkdirSync(join(home, 'profiles', 'default'), { recursive: true })
+    writeFileSync(join(home, 'profiles', 'default', '.model-run-token'), 'shared-token\n')
+    let identityHits = 0
+    const server = createServer((_req, res) => {
+      identityHits += 1
+      res.setHeader('content-type', 'application/json')
+      res.end(JSON.stringify({ identity: { kind: 'user', user_id: 4 } }))
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('expected TCP server address')
+
+    const responses = new Map<number, any>()
+    child = spawn(process.execPath, ['bin/hermes-studio-mcp.mjs', 'use'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HERMES_WEB_UI_URL: `http://127.0.0.1:${address.port}`,
+        HERMES_WEB_UI_HOME: home,
+        HERMES_WEB_UI_PROFILE: 'default',
+        AUTH_TOKEN: '',
+      },
+    })
+    child.stdout.on('data', (chunk) => {
+      for (const line of String(chunk).trim().split('\n')) {
+        if (!line) continue
+        const message = JSON.parse(line)
+        responses.set(message.id, message)
+      }
+    })
+
+    writeRpc(child, 83, 'tools/call', {
+      name: 'hermes_studio_use_whoami',
+      arguments: { session_id: 'session-b' },
+      _meta: { 'ai.hermes/session-id': 'session-a' },
+    })
+    const response = await waitForRpc(responses, 83)
+
+    expect(response.result.isError).toBe(true)
+    expect(response.result.content[0].text).toContain('current session')
+    expect(identityHits).toBe(0)
+    await new Promise<void>(resolve => server.close(() => resolve()))
   })
 
   it('exposes the curated Hermes Studio use catalog through one compact category tool', async () => {

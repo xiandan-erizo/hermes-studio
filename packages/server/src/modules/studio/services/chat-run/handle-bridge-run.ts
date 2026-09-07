@@ -48,7 +48,7 @@ import { resolveBridgeRunModelConfig, type RunModelGroup } from './model-config'
 import { filterBridgeToolCallMarkupDelta, flushPendingToolCallMarkup } from './bridge-delta'
 import { markAbortCompleted } from './abort'
 import { buildOutboundRunEvent } from './resume-payload'
-import { writeModelRunProfileToken } from './model-run-prompt'
+import { writeModelRunSessionToken } from './model-run-prompt'
 import type { AuthenticatedUser } from '../../public/auth'
 import { ensureHermesRunWorkspace } from './workspace'
 import { observeRunChatPetEvent } from '../../public/pet-events'
@@ -516,7 +516,7 @@ export async function handleBridgeRun(
     if (resolvedProvider && sessionRow.provider !== resolvedProvider) updates.provider = resolvedProvider
     if (Object.keys(updates).length > 0) updateSession(session_id, updates)
   }
-  await writeModelRunProfileToken(socketUser, profile)
+  await writeModelRunSessionToken(socketUser, profile, session_id)
   const runPrompt = [
     'When calling Hermes Web UI endpoints from tools or skills, include the current Hermes profile as the X-Hermes-Profile header if the endpoint supports profile-scoped behavior.',
   ].filter(Boolean).join('\n')

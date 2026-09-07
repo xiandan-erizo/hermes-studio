@@ -73,13 +73,34 @@ describe('Session ownership migration (P0)', () => {
 
   it('re-runs only rows below the current migration version', async () => {
     insert('late-1', 'cli', '5')
-    db.prepare('UPDATE sessions SET ownership_migration_version = 1 WHERE id = ?').run('late-1')
-    const { migrateSessionOwnership } = await load()
+    const { migrateSessionOwnership, SESSION_OWNERSHIP_MIGRATION_VERSION } = await load()
+    db.prepare('UPDATE sessions SET ownership_migration_version = ? WHERE id = ?').run(SESSION_OWNERSHIP_MIGRATION_VERSION, 'late-1')
     const summary = migrateSessionOwnership(db)
-    // already at version 1 -> not reprocessed, stays unresolved-free
+    // Already at the current version -> not reprocessed, stays unresolved-free.
     const row = db.prepare('SELECT ownership_state FROM sessions WHERE id = ?').get('late-1')
     expect(row.ownership_state).toBeNull()
     expect(summary.migrated).toBe(0)
+  })
+
+  it('normalizes channel rows that an older import incorrectly marked as owned', async () => {
+    db.prepare(`INSERT INTO sessions (
+      id, source, user_id, owner_user_id, ownership_state,
+      ownership_resolution, ownership_migration_version
+    ) VALUES ('legacy-channel', 'feishu', 'ou_abc', 3, 'owned', 'created', 1)`).run()
+    db.prepare(`INSERT INTO schema_migrations (migration_id, applied_at, result_summary)
+      VALUES ('session-ownership-v1', 1, '{"version":1}')`).run()
+
+    const { migrateSessionOwnership } = await load()
+    migrateSessionOwnership(db)
+
+    expect(db.prepare(`SELECT owner_user_id, external_actor_source, external_actor_id,
+      ownership_state, ownership_resolution FROM sessions WHERE id = 'legacy-channel'`).get()).toMatchObject({
+      owner_user_id: null,
+      external_actor_source: 'feishu',
+      external_actor_id: 'ou_abc',
+      ownership_state: 'external',
+      ownership_resolution: 'migration_external',
+    })
   })
 })
 

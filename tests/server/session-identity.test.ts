@@ -117,6 +117,44 @@ describe('Session identity descriptor', () => {
       expect(canOperateSession({ id: 4, role: 'user' }, channelSession)).toBe(false)
     })
 
+    it('uses the mapped channel actor instead of a stale imported owner', async () => {
+      insertUser(3, 'mapped-user')
+      insertUser(5, 'stale-importer')
+      db.prepare("INSERT INTO external_identities (source, external_id, user_id) VALUES ('feishu', 'ou_abc', 3)").run()
+      const { describeSessionIdentity, resolveSessionAccess } = await load()
+      const channelSession = {
+        source: 'feishu',
+        user_id: 'ou_abc',
+        owner_user_id: 5,
+        ownership_state: 'owned',
+      }
+
+      expect(describeSessionIdentity(channelSession)).toMatchObject({
+        kind: 'channel_user',
+        user_id: 3,
+        channel: { source: 'feishu', external_id: 'ou_abc' },
+      })
+      expect(resolveSessionAccess({ id: 3, role: 'user' }, channelSession)).toBe('read_external')
+      expect(resolveSessionAccess({ id: 5, role: 'user' }, channelSession)).toBe('none')
+    })
+
+    it('does not expose a stale owner when a channel session has no actor id', async () => {
+      insertUser(5, 'stale-importer')
+      const { describeSessionIdentity, resolveSessionAccess } = await load()
+      const channelSession = {
+        source: 'dingtalk',
+        user_id: null,
+        owner_user_id: 5,
+        ownership_state: 'owned',
+      }
+
+      expect(describeSessionIdentity(channelSession)).toMatchObject({
+        kind: 'anonymous',
+        note: 'channel session has no external actor',
+      })
+      expect(resolveSessionAccess({ id: 5, role: 'user' }, channelSession)).toBe('none')
+    })
+
     it('keeps destructive operations owner/admin-only for the mapped user', async () => {
       insertUser(3, 'sunkesi')
       db.prepare("INSERT INTO external_identities (source, external_id, user_id) VALUES ('feishu', 'ou_abc', 3)").run()

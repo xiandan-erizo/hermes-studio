@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
+import { createHash } from 'crypto'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -793,7 +794,7 @@ describe('bridge run final context usage', () => {
     }))
   })
 
-  it('stores a super admin model-run token for the profile without adding it to bridge instructions', async () => {
+  it('stores a super admin model-run token for the session without adding it to bridge instructions', async () => {
     const emit = vi.fn()
     const nsp = makeNamespace(emit)
     const socket = makeSocket()
@@ -829,7 +830,8 @@ describe('bridge run final context usage', () => {
 
     const instructions = bridge.contextEstimate.mock.calls[0][2]
     expect(issueModelRunJwtMock).toHaveBeenCalledWith({ id: 1, username: 'admin', role: 'super_admin' })
-    expect(readFileSync(join(process.env.HERMES_WEB_UI_HOME || '', 'profiles', 'default', '.model-run-token'), 'utf-8').trim()).toBe('model-run-token')
+    const sessionTokenName = `${createHash('sha256').update('session-1').digest('hex')}.jwt`
+    expect(readFileSync(join(process.env.HERMES_WEB_UI_HOME || '', 'profiles', 'default', '.model-run-tokens', sessionTokenName), 'utf-8').trim()).toBe('model-run-token')
     expect(instructions).not.toContain('[Current Hermes profile:')
     expect(instructions).not.toContain('Current working directory')
     expect(instructions).not.toContain('pass the current Hermes profile as the profile argument')

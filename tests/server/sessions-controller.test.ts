@@ -2255,6 +2255,52 @@ describe('session conversations controller', () => {
     expect(ctx.body).toMatchObject({ ok: true, imported: true })
   })
 
+  it('does not return an existing local session owned by another profile member during import', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+    localGetSessionDetailMock.mockReturnValue({
+      id: 'private-session',
+      profile: 'default',
+      source: 'cli',
+      owner_user_id: 9,
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'private-session' },
+      query: { profile: 'default' },
+      state: { user: { id: 3, role: 'user' } },
+      body: null,
+    }
+
+    await mod.importHermesSession(ctx)
+
+    expect(ctx.status).toBe(404)
+    expect(ctx.body).toEqual({ error: 'Session not found' })
+  })
+
+  it('does not let a profile member claim an unowned CLI history session during import', async () => {
+    listUserProfilesMock.mockReturnValue([{ profile_name: 'default' }])
+    localGetSessionDetailMock.mockReturnValue(null)
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue({
+      id: 'unowned-cli',
+      source: 'cli',
+      user_id: null,
+      messages: [{ role: 'user', content: 'private', timestamp: 1 }],
+    })
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'unowned-cli' },
+      query: { profile: 'default' },
+      state: { user: { id: 3, role: 'user' } },
+      body: null,
+    }
+
+    await mod.importHermesSession(ctx)
+
+    expect(ctx.status).toBe(404)
+    expect(ctx.body).toEqual({ error: 'Session not found' })
+    expect(localCreateSessionMock).not.toHaveBeenCalled()
+  })
+
   it('preserves the channel source and actor id when importing a channel session', async () => {
     const hermesDetail = {
       id: '20260825_164529_feishu1',

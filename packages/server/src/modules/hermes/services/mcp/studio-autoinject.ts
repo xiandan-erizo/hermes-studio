@@ -181,6 +181,7 @@ function managedConfig(
   return {
     ...managedCommandConfig(toolset, bundledScript),
     ...(toolset === 'use' ? { timeout: MANAGED_USE_MCP_TIMEOUT_SECONDS } : {}),
+    forward_session_context: true,
     env,
     enabled: true,
   }
@@ -209,6 +210,7 @@ function sameConfig(existing: Record<string, any>, desired: Record<string, unkno
   return existing.command === desired.command &&
     sameArgs(existing, desired) &&
     (desired.timeout === undefined || existing.timeout === desired.timeout) &&
+    existing.forward_session_context === true &&
     existing.enabled !== false &&
     isRecord(existing.env) &&
     existing.env.HERMES_WEB_UI_URL === desiredEnv.HERMES_WEB_UI_URL &&

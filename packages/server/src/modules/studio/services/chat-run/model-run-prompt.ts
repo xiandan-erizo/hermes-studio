@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from 'fs/promises'
+import { createHash } from 'crypto'
 import { dirname, join } from 'path'
 import { getWebUiHome } from '../../public/config'
 import { issueModelRunJwt, type AuthenticatedUser } from '../../public/auth'
@@ -19,10 +20,27 @@ export function modelRunProfileTokenPath(profile: string): string {
   return join(getWebUiHome(), 'profiles', normalizeProfileSegment(profile), MODEL_RUN_TOKEN_FILE)
 }
 
-export async function writeModelRunProfileToken(user: AuthenticatedUser | undefined, profile: string): Promise<void> {
-  if (!user) return
-  const token = await issueModelRunJwt(user)
-  const tokenPath = modelRunProfileTokenPath(profile)
+function sessionTokenFilename(sessionId: string): string {
+  const normalized = String(sessionId || '').trim()
+  if (!normalized) {
+    const err = new Error('Invalid session id')
+    ;(err as any).status = 400
+    throw err
+  }
+  return `${createHash('sha256').update(normalized).digest('hex')}.jwt`
+}
+
+export function modelRunSessionTokenPath(profile: string, sessionId: string): string {
+  return join(
+    getWebUiHome(),
+    'profiles',
+    normalizeProfileSegment(profile),
+    '.model-run-tokens',
+    sessionTokenFilename(sessionId),
+  )
+}
+
+async function writeRestrictedToken(tokenPath: string, token: string): Promise<void> {
   const mkdirOptions: any = { recursive: true }
   const writeOptions: any = {}
   if (process.platform !== 'win32') {
@@ -31,4 +49,20 @@ export async function writeModelRunProfileToken(user: AuthenticatedUser | undefi
   }
   await mkdir(dirname(tokenPath), mkdirOptions)
   await writeFile(tokenPath, `${token}\n`, writeOptions)
+}
+
+export async function writeModelRunProfileToken(user: AuthenticatedUser | undefined, profile: string): Promise<void> {
+  if (!user) return
+  const token = await issueModelRunJwt(user)
+  await writeRestrictedToken(modelRunProfileTokenPath(profile), token)
+}
+
+export async function writeModelRunSessionToken(
+  user: AuthenticatedUser | undefined,
+  profile: string,
+  sessionId: string,
+): Promise<void> {
+  if (!user) return
+  const token = await issueModelRunJwt(user)
+  await writeRestrictedToken(modelRunSessionTokenPath(profile, sessionId), token)
 }

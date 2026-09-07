@@ -141,7 +141,11 @@ export async function refreshChannelSessionFromHermes(sessionId: string, profile
   if (stateCount == null) return false
 
   const localCount = getMessageCount(sessionId)
-  if (stateCount === localCount) return false
+  if (local.upstream_message_count != null && stateCount === local.upstream_message_count) return false
+  if (local.upstream_message_count == null && stateCount === localCount) {
+    updateSession(sessionId, { upstream_message_count: stateCount })
+    return false
+  }
 
   let detail: any = null
   try {
@@ -172,6 +176,7 @@ export async function refreshChannelSessionFromHermes(sessionId: string, profile
     cost_status: detail.cost_status,
     preview: detail.preview,
     last_active: detail.last_active,
+    upstream_message_count: stateCount,
   }
   for (const key of Object.keys(metadata)) {
     if (metadata[key] === undefined) delete metadata[key]

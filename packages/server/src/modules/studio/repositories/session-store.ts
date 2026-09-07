@@ -46,6 +46,7 @@ export interface HermesSessionRow {
   workspace: string | null
   category_id: number | null
   history_revision: number
+  upstream_message_count?: number | null
   // ---- session ownership (P0) ----
   owner_user_id: number | null
   external_actor_source: string | null
@@ -157,6 +158,7 @@ function mapSessionRow(row: Record<string, unknown>): HermesSessionRow {
     workspace: row.workspace != null ? String(row.workspace) : null,
     category_id: row.category_id != null ? Number(row.category_id) : null,
     history_revision: Number(row.history_revision || 0),
+    upstream_message_count: row.upstream_message_count != null ? Number(row.upstream_message_count) : null,
     owner_user_id: row.owner_user_id != null ? Number(row.owner_user_id) : null,
     external_actor_source: row.external_actor_source != null ? String(row.external_actor_source) : null,
     external_actor_id: row.external_actor_id != null ? String(row.external_actor_id) : null,
@@ -234,6 +236,7 @@ export function createSession(data: {
       cost_status: '', preview: '', last_active: now, is_archived: 0, push_enabled: data.push_enabled ? 1 : 0, workspace: data.workspace || null,
       category_id: data.category_id ?? null,
       history_revision: 0,
+      upstream_message_count: null,
       owner_user_id: data.owner_user_id ?? null,
       external_actor_source: null, external_actor_id: null,
       origin_source: null, origin_session_id: null,

@@ -126,6 +126,7 @@ describe('studio MCP autoinject', () => {
         HERMES_WEB_UI_MANAGED_MCP: '1',
       },
       enabled: true,
+      forward_session_context: true,
     })
     expect(injectedDefault.data.mcp_servers['hermes-studio-browser']).toMatchObject({
       command: process.execPath,

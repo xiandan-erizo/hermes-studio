@@ -54,8 +54,7 @@ import { getGroupChatServer } from './group-chat'
 import { logger } from '../public/logging'
 import { isHermesAgentAvailable } from '../public/agent-status-registry'
 import { listUserProfiles } from '../public/users'
-import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities, describeSessionIdentity } from '../services/session-access'
-import { isChannelSource } from '../repositories/external-identities-store'
+import { denySessionRead, denySessionOperation, canReadSession, canOperateSession, externalActorOf, resolveExternalActorUser, inheritSessionIdentities, describeSessionIdentity, isChannelSession } from '../services/session-access'
 import { buildImportMessages, refreshChannelSessionFromHermes } from '../services/channel-session-refresh'
 import { defaultHermesWorkspace, ensureHermesRunWorkspace } from '../services/chat-run/workspace'
 import { getChatRunServer } from '../services/chat-run/server-registry'
@@ -1189,6 +1188,7 @@ export async function importHermesSession(ctx: any) {
 
   const existing = localGetSessionDetail(sessionId)
   if (existing) {
+    if (String(existing.profile || 'default') !== profile || denySessionRead(ctx, existing)) return
     ctx.body = { ok: true, imported: false, session: existing }
     return
   }
@@ -1214,6 +1214,7 @@ export async function importHermesSession(ctx: any) {
     ctx.body = { error: 'Session not found' }
     return
   }
+  if (denySessionRead(ctx, detail)) return
 
   const profileDefault = await getProfileDefaultModel(profile)
   const importTimestamp = Math.floor(Date.now() / 1000)
@@ -1229,7 +1230,7 @@ export async function importHermesSession(ctx: any) {
     // identity; assigning the importing user as owner would make them the
     // requester in identity lookups and grant full access to a conversation
     // that should stay read-only for the mapped channel user.
-    owner_user_id: isChannelSource(detail.source || 'cli') ? null : ctx.state?.user?.id ?? null,
+    owner_user_id: isChannelSession(detail) ? null : ctx.state?.user?.id ?? null,
   })
 
   localUpdateSession(detail.id, {
@@ -1253,6 +1254,7 @@ export async function importHermesSession(ctx: any) {
     actual_cost_usd: detail.actual_cost_usd,
     cost_status: detail.cost_status,
     preview: detail.preview,
+    upstream_message_count: Array.isArray(detail.messages) ? detail.messages.length : undefined,
     last_active: importTimestamp,
   })
 
@@ -2121,7 +2123,7 @@ export async function getConversationMessagesPaginated(ctx: any) {
   const localSnapshotSession = localGetSession(ctx.params.id)
   if (
     localSnapshotSession
-    && isChannelSource(String(localSnapshotSession.source || ''))
+    && isChannelSession(localSnapshotSession)
     && isHermesAgentAvailable()
     && !getChatRunServer()?.isSessionRunActive(ctx.params.id)
   ) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline'
-import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -38,6 +39,8 @@ function readPackageVersion() {
 }
 
 const VERSION = readPackageVersion()
+const SESSION_CONTEXT_META_KEY = 'ai.hermes/session-id'
+const toolCallContext = new AsyncLocalStorage()
 
 function printHelp() {
   process.stdout.write(`${DISPLAY_COMMAND} v${VERSION}
@@ -100,10 +103,33 @@ function readProfileToken(profile) {
   }
 }
 
+function normalizeSessionId(sessionId) {
+  const value = typeof sessionId === 'string' ? sessionId.trim() : ''
+  return value && value.length <= 512 ? value : ''
+}
+
+function trustedSessionId() {
+  return normalizeSessionId(toolCallContext.getStore()?.sessionId)
+}
+
+function readSessionToken(profile, sessionId) {
+  const segment = normalizeProfileSegment(profile)
+  const normalizedSessionId = normalizeSessionId(sessionId)
+  if (!segment || !normalizedSessionId) return ''
+  const digest = createHash('sha256').update(normalizedSessionId).digest('hex')
+  try {
+    return readFileSync(join(appHome(), 'profiles', segment, '.model-run-tokens', `${digest}.jwt`), 'utf8').trim()
+  } catch {
+    return ''
+  }
+}
+
 function readToken(tokenOverride, allowTokenFile = true, profile = '') {
   const explicit = tokenOverride || process.env.HERMES_WEB_UI_TOKEN || process.env.AUTH_TOKEN
   if (explicit) return explicit.trim()
   if (!allowTokenFile) return ''
+  const contextSessionId = trustedSessionId()
+  if (contextSessionId) return readSessionToken(profile, contextSessionId)
   const profileToken = readProfileToken(profile)
   if (profileToken) return profileToken
   try {
@@ -182,9 +208,12 @@ function normalizePublicHeaders(headers) {
 }
 
 async function requestEnvelope(path, options = {}) {
-  const profile = typeof options.profile === 'string' && options.profile.trim()
-    ? options.profile.trim()
-    : defaultProfile()
+  const configuredProfile = defaultProfile()
+  const profile = trustedSessionId()
+    ? configuredProfile
+    : typeof options.profile === 'string' && options.profile.trim()
+      ? options.profile.trim()
+      : configuredProfile
   const token = readToken(options.token, options.allowTokenFile !== false, profile)
   const method = options.method || 'GET'
   const body = method === 'GET' || method === 'HEAD' ? undefined : options.body
@@ -1875,8 +1904,16 @@ async function callTool(name, args = {}) {
         await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}/context`, withAuthArgs(args)),
         args,
       ))
-    case 'hermes_studio_use_whoami':
-      return jsonText(await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}/identity`, withAuthArgs(args)))
+    case 'hermes_studio_use_whoami': {
+      const requestedSessionId = normalizeSessionId(args.session_id)
+      const contextSessionId = trustedSessionId()
+      if (contextSessionId && requestedSessionId !== contextSessionId) {
+        return errorText('whoami can only inspect the current session')
+      }
+      const sessionId = contextSessionId || requestedSessionId
+      if (!sessionId) return errorText('session_id is required')
+      return jsonText(await request(`/api/studio/sessions/${encodeURIComponent(sessionId)}/identity`, withAuthArgs(args)))
+    }
     case 'hermes_studio_use_session_delete':
       return jsonText(await request(`/api/studio/sessions/${encodeURIComponent(args.session_id)}`, withAuthArgs(args, {
         method: 'DELETE',
@@ -2052,12 +2089,20 @@ async function handle(message) {
         }
       case 'tools/list':
         return { jsonrpc: '2.0', id: message.id, result: { tools: visibleTools() } }
-      case 'tools/call':
+      case 'tools/call': {
+        const context = {
+          sessionId: normalizeSessionId(message.params?._meta?.[SESSION_CONTEXT_META_KEY]),
+        }
+        const result = await toolCallContext.run(
+          context,
+          () => callTool(message.params?.name, message.params?.arguments || {}),
+        )
         return {
           jsonrpc: '2.0',
           id: message.id,
-          result: await callTool(message.params?.name, message.params?.arguments || {}),
+          result,
         }
+      }
       default:
         return {
           jsonrpc: '2.0',

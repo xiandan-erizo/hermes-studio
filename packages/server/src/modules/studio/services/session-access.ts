@@ -59,6 +59,12 @@ export interface ExternalActor {
   externalId: string
 }
 
+export function isChannelSession(
+  session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
+): boolean {
+  return isChannelSource(String(session?.source || ''))
+}
+
 export function externalActorOf(
   session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
 ): ExternalActor | null {
@@ -110,6 +116,28 @@ function ssoDescriptorOf(userId: number): SessionIdentitySsoDescriptor | null {
   }
 }
 
+function describeExternalActorIdentity(
+  session: SessionOwnershipFields & HermesHistoryFields,
+  actor: ExternalActor,
+): SessionIdentityDescriptor {
+  const channel = { source: actor.source, external_id: actor.externalId }
+  const mapped = resolveExternalActorUser(session)
+  if (mapped) {
+    const owner = findUserById(Number(mapped.id))
+    const sso = owner ? ssoDescriptorOf(Number(owner.id)) : null
+    return {
+      kind: 'channel_user',
+      channel,
+      user_id: Number(mapped.id),
+      username: owner?.username || null,
+      display_name: sso?.display_name || null,
+      email: sso?.email || emailHintFor(owner?.username),
+      sso,
+    }
+  }
+  return { kind: 'channel', channel, note: 'external actor is not mapped to a Studio user' }
+}
+
 /**
  * Verified identity bound to a session: the owner user (with SSO profile
  * fields), the Studio user an external channel actor maps to, or the raw
@@ -119,6 +147,12 @@ export function describeSessionIdentity(
   session: (SessionOwnershipFields & HermesHistoryFields) | null | undefined,
 ): SessionIdentityDescriptor {
   if (!session) return { kind: 'anonymous', note: 'session has no bound identity' }
+  const actor = externalActorOf(session)
+  if (isChannelSession(session)) {
+    return actor
+      ? describeExternalActorIdentity(session, actor)
+      : { kind: 'anonymous', note: 'channel session has no external actor' }
+  }
   if (session.owner_user_id != null) {
     const owner = findUserById(Number(session.owner_user_id))
     if (!owner) {
@@ -145,24 +179,8 @@ export function describeSessionIdentity(
       ...(owner.status !== 'active' ? { note: 'owner user is not active' } : {}),
     }
   }
-  const actor = externalActorOf(session)
   if (actor) {
-    const channel = { source: actor.source, external_id: actor.externalId }
-    const mapped = resolveExternalActorUser(session)
-    if (mapped) {
-      const owner = findUserById(Number(mapped.id))
-      const sso = owner ? ssoDescriptorOf(Number(owner.id)) : null
-      return {
-        kind: 'channel_user',
-        channel,
-        user_id: Number(mapped.id),
-        username: owner?.username || null,
-        display_name: sso?.display_name || null,
-        email: sso?.email || emailHintFor(owner?.username),
-        sso,
-      }
-    }
-    return { kind: 'channel', channel, note: 'external actor is not mapped to a Studio user' }
+    return describeExternalActorIdentity(session, actor)
   }
   return { kind: 'anonymous', note: 'session has no bound identity' }
 }
@@ -173,6 +191,10 @@ export function resolveSessionAccess(
 ): SessionAccess {
   if (!user || !session) return 'none'
   if (user.role === 'super_admin') return 'full'
+  if (isChannelSession(session)) {
+    const mapped = resolveExternalActorUser(session)
+    return mapped && Number(mapped.id) === Number(user.id) ? 'read_external' : 'none'
+  }
   if (session.owner_user_id != null && Number(session.owner_user_id) === Number(user.id)) return 'full'
   const mapped = resolveExternalActorUser(session)
   if (mapped && Number(mapped.id) === Number(user.id)) return 'read_external'
@@ -194,7 +216,7 @@ export function shouldClaimSessionOwnership(
 ): boolean {
   if (!session || !user) return false
   if (session.owner_user_id != null || session.ownership_state != null) return false
-  return !isChannelSource(String(session.source || ''))
+  return !isChannelSession(session)
 }
 
 export function canOperateSession(user: SessionAccessUser | null | undefined, session: SessionOwnershipFields & HermesHistoryFields | null | undefined): boolean {
@@ -203,7 +225,7 @@ export function canOperateSession(user: SessionAccessUser | null | undefined, se
   // The Studio user a channel actor maps to may operate that conversation
   // (continue it in the Web UI). Scoped to channel sessions only: inherited
   // external-actor rows on subagent sessions stay read-only.
-  if (access === 'read_external' && isChannelSource(String(session?.source || ''))) return true
+  if (access === 'read_external' && isChannelSession(session)) return true
   return false
 }
 

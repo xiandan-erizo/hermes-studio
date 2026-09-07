@@ -111,6 +111,28 @@ describe('channel-session-refresh', () => {
     expect(localMessageCount('sess-b')).toBe(2)
   })
 
+  it('does not rebuild again when upstream contains filtered metadata messages', async () => {
+    await initTestDb()
+    insertChannelSession('sess-meta')
+    insertLocalMessages('sess-meta', ['old'])
+    const detail = {
+      id: 'sess-meta',
+      source: 'feishu',
+      user_id: 'ou_x',
+      message_count: 3,
+      messages: [
+        { role: 'session_meta', content: '{"channel":"feishu"}', timestamp: 299 },
+        { role: 'user', content: 'hello', timestamp: 300 },
+        { role: 'assistant', content: 'hi', timestamp: 301 },
+      ],
+    }
+    const { refreshChannelSessionFromHermes } = await load(async () => 3, detail)
+
+    expect(await refreshChannelSessionFromHermes('sess-meta', 'default')).toBe(true)
+    expect(localMessageCount('sess-meta')).toBe(2)
+    expect(await refreshChannelSessionFromHermes('sess-meta', 'default')).toBe(false)
+  })
+
   it('ignores non-channel sessions', async () => {
     await initTestDb()
     db.prepare(`

@@ -89,6 +89,8 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   workspace: 'TEXT',
   category_id: 'INTEGER',
   history_revision: 'INTEGER NOT NULL DEFAULT 0',
+  // Raw Hermes state.db message count used to detect imported snapshot drift.
+  upstream_message_count: 'INTEGER',
   // ---- session ownership (P0) ----
   // Studio 授权主体：谁能继续/修改/删除这条本地会话。与旧 user_id（语义混合）解耦。
   owner_user_id: 'INTEGER',
@@ -98,7 +100,7 @@ export const SESSIONS_SCHEMA: Record<string, string> = {
   origin_session_id: 'TEXT',
   // 'owned' | 'external' | 'unresolved' | NULL(=尚未迁移)
   ownership_state: 'TEXT',
-  // 'created' | 'migration_verified' | 'imported' | 'admin_claimed'
+  // 'created' | 'migration_verified' | 'migration_external' | 'imported' | 'admin_claimed'
   ownership_resolution: 'TEXT',
   ownership_migration_version: 'INTEGER',
 }
