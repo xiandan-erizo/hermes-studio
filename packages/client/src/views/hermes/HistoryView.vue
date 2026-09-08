@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { type Session } from '@/stores/hermes/chat'
+import { useChatStore, type Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSessionBrowserPrefsStore } from '@/stores/hermes/session-browser-prefs'
@@ -10,6 +10,8 @@ import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
 import { copyToClipboard } from '@/utils/clipboard'
 import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
+import MessageList from '@/components/hermes/chat/MessageList.vue'
+import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import OutlinePanel from '@/components/hermes/chat/OutlinePanel.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
@@ -17,6 +19,7 @@ import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
 import { batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
 
 const appStore = useAppStore()
+const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore()
 const message = useMessage()
@@ -44,7 +47,9 @@ const hermesSessionsLoaded = ref(false)
 const historySessionId = ref<string | null>(null)
 const historySession = ref<Session | null>(null)
 const showOutline = ref(false)
-const historyMessageListRef = ref<InstanceType<typeof HistoryMessageList> | null>(null)
+const historyMessageListRef = ref<{
+  scrollToAnchor: (messageId: string, anchorId: string) => void
+} | null>(null)
 const isBatchMode = ref(false)
 const isBatchDeleting = ref(false)
 const showBatchDeleteConfirm = ref(false)
@@ -332,22 +337,27 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
 }
 
 const CHANNEL_SOURCES = ['feishu', 'dingtalk', 'weixin', 'wecom', 'webhook']
-const autoImportedChannelSessions = new Set<string>()
+let inlineChannelActivationRequestId = 0
 
-/**
- * Lazily import channel conversations (feishu/dingtalk/...) from the agent
- * state.db into the local Web UI store when the user opens them, so the
- * conversation monitor picks them up without a manual context-menu import.
- * Idempotent on the server: already-imported sessions return instantly.
- */
-function maybeAutoImportChannelSession(summary: { id: string; source?: string | null; profile?: string | null }) {
-  if (!CHANNEL_SOURCES.includes(String(summary.source || '').toLowerCase())) return
-  const key = `${summary.profile || 'default'}:${summary.id}`
-  if (autoImportedChannelSessions.has(key)) return
-  autoImportedChannelSessions.add(key)
-  void importHermesSession(summary.id, summary.profile || null).catch(() => {
-    autoImportedChannelSessions.delete(key)
-  })
+function isChannelHistorySession(session: { source?: string | null } | null | undefined): boolean {
+  return CHANNEL_SOURCES.includes(String(session?.source || '').toLowerCase())
+}
+
+async function activateInlineChannelChat(
+  summary: SessionSummary,
+  profile: string | null,
+  requestId: number,
+): Promise<void> {
+  try {
+    await importHermesSession(summary.id, profile)
+    if (requestId !== inlineChannelActivationRequestId || routeSessionId.value !== summary.id) return
+    chatStore.setRuntimeMode('default')
+    chatStore.setSessionProfileFilter(profile || summary.profile || 'default')
+    const snapshot = historySession.value?.id === summary.id ? historySession.value : null
+    await chatStore.loadSessions(profile || summary.profile || null, summary.id, snapshot)
+  } catch (err) {
+    console.error('Failed to activate inline channel chat:', err)
+  }
 }
 
 async function handleSessionClick(sessionId: string, profile?: string | null) {
@@ -382,6 +392,7 @@ async function openDefaultHistorySession(replace = false) {
 }
 
 async function syncRouteSession() {
+  const activationRequestId = ++inlineChannelActivationRequestId
   const sessionId = routeSessionId.value
   if (!sessionId) return
 
@@ -392,8 +403,6 @@ async function syncRouteSession() {
     await router.replace({ name: 'hermes.history' })
     return
   }
-
-  maybeAutoImportChannelSession(summary)
 
   if (collapsedGroups.value.has(summary.source)) {
     collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== summary.source))
@@ -406,6 +415,9 @@ async function syncRouteSession() {
     historySessionId.value = sessionId
     historySession.value = null
     await loadHistorySession(sessionId, sessionProfile)
+  }
+  if (isChannelHistorySession(summary)) {
+    void activateInlineChannelChat(summary, sessionProfile, activationRequestId)
   }
 }
 
@@ -679,12 +691,21 @@ watch(hermesSessionsLoaded, (loaded) => {
   }
 }, { once: true })
 
+const inlineChannelSession = computed(() => {
+  if (!isChannelHistorySession(historySession.value)) return null
+  return chatStore.activeSession?.id === historySession.value?.id
+    ? chatStore.activeSession
+    : null
+})
+
+const displayedSession = computed(() => inlineChannelSession.value || historySession.value)
+
 const activeSessionTitle = computed(() =>
-  historySession.value?.title || t('chat.newChat'),
+  displayedSession.value?.title || t('chat.newChat'),
 )
 
 const activeSessionSource = computed(() =>
-  historySession.value?.source || '',
+  displayedSession.value?.source || '',
 )
 
 async function copySessionId(id?: string) {
@@ -1056,7 +1077,7 @@ function handleBatchDeleteConfirm() {
           </NButton>
           <span class="header-session-title">{{ activeSessionTitle }}</span>
           <span v-if="activeSessionSource" class="source-badge">{{ getSourceLabel(activeSessionSource) }}</span>
-          <span v-if="historySession?.workspace" class="workspace-badge" :title="historySession.workspace">📁 {{ historySession.workspace.split('/').pop() || historySession.workspace }}</span>
+          <span v-if="displayedSession?.workspace" class="workspace-badge" :title="displayedSession.workspace">📁 {{ displayedSession.workspace.split('/').pop() || displayedSession.workspace }}</span>
         </div>
         <div class="header-actions">
           <NTooltip trigger="hover">
@@ -1084,17 +1105,28 @@ function handleBatchDeleteConfirm() {
 
       <div class="history-content-wrapper">
         <div class="history-main-content">
+          <MessageList
+            v-if="inlineChannelSession"
+            ref="historyMessageListRef"
+            scroll-scope="history-channel-chat"
+          />
           <HistoryMessageList
+            v-else
             :key="historySession?.id || 'history-empty'"
             ref="historyMessageListRef"
             :session="historySession"
             :load-older="loadOlderHistoryMessages"
             scroll-scope="history"
           />
+          <ChatInput
+            v-if="inlineChannelSession"
+            :model-label="inlineChannelSession.model || ''"
+            :model-disabled="true"
+          />
         </div>
         <OutlinePanel
-          v-if="showOutline && historySession"
-          :messages="historySession.messages || []"
+          v-if="showOutline && displayedSession"
+          :messages="displayedSession.messages || []"
           @navigate="handleOutlineNavigate"
         />
       </div>

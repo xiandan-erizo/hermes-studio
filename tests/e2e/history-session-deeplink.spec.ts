@@ -74,6 +74,30 @@ const historySessions = [
     cost_status: '',
     workspace: null,
   },
+  {
+    id: 'hist-feishu',
+    profile: 'default',
+    source: 'feishu',
+    model: 'test-model',
+    provider: 'test-provider',
+    title: 'Feishu History Session',
+    preview: 'Feishu preview',
+    started_at: 1_790_000_600,
+    ended_at: null,
+    last_active: 1_790_000_700,
+    message_count: 2,
+    tool_call_count: 0,
+    input_tokens: 70,
+    output_tokens: 80,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    reasoning_tokens: 0,
+    billing_provider: null,
+    estimated_cost_usd: 0,
+    actual_cost_usd: null,
+    cost_status: '',
+    workspace: null,
+  },
 ]
 
 function detailFor(id: string, sessions = historySessions) {
@@ -155,6 +179,7 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
     if (pathname === '/api/hermes/runtime-versions/jobs' && request.method() === 'GET') return json({ jobs: [] })
     if (pathname === '/api/hermes/available-models') return json({ default: 'test-model', default_provider: 'test-provider', groups: [TEST_MODEL_GROUP], allProviders: [TEST_MODEL_GROUP], model_aliases: {}, model_visibility: {} })
     if (pathname === '/api/hermes/profiles') return json({ profiles: [{ name: 'default', active: true, model: 'test-model', gateway: 'test' }] })
+    if (pathname === '/api/studio/sessions') return json({ sessions: [] })
     if (pathname === '/api/studio/group-chat/rooms') {
       const offset = Number(url.searchParams.get('offset') || 0)
       const limit = Number(url.searchParams.get('limit') || 50)
@@ -222,6 +247,14 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
       return detail ? json({ session: detail }) : json({ error: 'Session not found' }, 404)
     }
 
+    const importMatch = pathname.match(/^\/api\/studio\/sessions\/hermes\/([^/]+)\/import$/)
+    if (importMatch && request.method() === 'POST') {
+      const detail = detailFor(decodeURIComponent(importMatch[1]), sessions)
+      return detail
+        ? json({ ok: true, imported: true, session: detail })
+        : json({ error: 'Session not found' }, 404)
+    }
+
     return json({ error: `Unexpected mocked route: ${request.method()} ${pathname}` }, 404)
   })
 }
@@ -237,7 +270,17 @@ test.describe('history session deep links', () => {
 
     await expect(page.getByText('Beta History Session').first()).toBeVisible()
     await expect(page.getByText('Answer from Beta History Session')).toBeVisible()
+    await expect(page.locator('textarea.input-textarea')).toHaveCount(0)
     await expect(page).toHaveURL(/#\/hermes\/history\/session\/hist-beta$/)
+  })
+
+  test('channel history session can continue inline without leaving history', async ({ page }) => {
+    await page.goto('/#/hermes/history/session/hist-feishu')
+
+    await expect(page.getByText('Feishu History Session').first()).toBeVisible()
+    await expect(page.getByText('Answer from Feishu History Session')).toBeVisible()
+    await expect(page.locator('textarea.input-textarea')).toBeVisible()
+    await expect(page).toHaveURL(/#\/hermes\/history\/session\/hist-feishu$/)
   })
 
   test('completed tool runs can expand and collapse in history', async ({ page }) => {
