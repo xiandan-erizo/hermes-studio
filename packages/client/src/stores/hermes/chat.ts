@@ -1,5 +1,5 @@
 import { startRunViaSocket, resumeSession, registerSessionHandlers, unregisterSessionHandlers, getChatRunSocket, respondToolApproval, onPeerUserMessage, onSessionCommand, onSessionTitleUpdated, onSessionWorkspaceUpdated, onSessionSettingsUpdated, respondClarify, type ChatRunTransport, type RunEvent, type ResumeSessionPayload, type StartRunRequest, type ContentBlock as ContentBlockImport } from '@/api/studio/chat'
-import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
+import { archiveSession as archiveSessionApi, deleteSession as deleteSessionApi, fetchHermesSession, fetchSessionMessagesPage, fetchSessions, fetchWorkspaceRunChangeFile, setSessionModel, setSessionPushEnabled as persistSessionPushEnabled, setSessionReasoningEffort as persistSessionReasoningEffort, type HermesMessage, type SessionSummary, type WorkspaceRunChangeFileDetail, type WorkspaceRunChangeSummary } from '@/api/studio/sessions'
 import { getActiveProfileName } from '@/api/client'
 import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAgentId } from '@/api/coding-agents'
 import { getDownloadUrl } from '@/api/studio/download'
@@ -1669,8 +1669,16 @@ export const useChatStore = defineStore('chat', () => {
     const selectionSequence = activeSelectionSequence
     isLoadingSessions.value = true
     try {
-      const list = await fetchRuntimeSessions(profile)
+      let list = await fetchRuntimeSessions(profile)
       if (requestSequence !== loadSessionsRequestSequence) return
+      if (preferredSessionId && !list.some(session => session.id === preferredSessionId)) {
+        const routedSession = await fetchHermesSession(preferredSessionId, profile)
+        if (requestSequence !== loadSessionsRequestSequence) return
+        const source = String(routedSession?.source || '').toLowerCase()
+        if (routedSession && ['feishu', 'dingtalk', 'weixin', 'wecom', 'webhook'].includes(source)) {
+          list = [routedSession, ...list]
+        }
+      }
       const fresh = list.map(mapHermesSession)
       const selectionChanged = selectionSequence !== activeSelectionSequence
       const explicitlySelectedSession = selectionChanged && activeSessionId.value

@@ -3,10 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/hermes/chat'
 import { startRunViaSocket } from '@/api/studio/chat'
-import { archiveSession, fetchSessions } from '@/api/studio/sessions'
+import { archiveSession, fetchHermesSession, fetchSessions } from '@/api/studio/sessions'
 
 vi.mock('@/api/studio/sessions', () => ({
   archiveSession: vi.fn(),
+  fetchHermesSession: vi.fn(),
   fetchSessions: vi.fn(),
   fetchSessionMessagesPage: vi.fn(),
   fetchWorkspaceRunChangesForSession: vi.fn(async () => []),
@@ -236,5 +237,35 @@ describe('chat session ordering', () => {
 
     expect(store.activeSessionId).toBe('session-b')
     expect(store.activeSession).toBe(store.sessions.find(session => session.id === 'session-b'))
+  })
+
+  it('loads an explicitly routed channel session that the default chat list omits', async () => {
+    vi.mocked(fetchSessions).mockResolvedValue([])
+    vi.mocked(fetchHermesSession).mockResolvedValue({
+      ...makeSession('feishu-session', { started_at: 1000, last_active: 2000 }),
+      source: 'feishu',
+      messages: [],
+    } as any)
+
+    const store = useChatStore()
+    await store.loadSessions('default', 'feishu-session')
+
+    expect(fetchHermesSession).toHaveBeenCalledWith('feishu-session', 'default')
+    expect(store.activeSessionId).toBe('feishu-session')
+    expect(store.activeSession?.source).toBe('feishu')
+
+    await store.sendMessage('continue from web')
+    expect(startRunViaSocket).toHaveBeenCalledWith(
+      expect.objectContaining({
+        session_id: 'feishu-session',
+        profile: 'default',
+        source: 'cli',
+      }),
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(Function),
+      undefined,
+      expect.any(Object),
+    )
   })
 })
