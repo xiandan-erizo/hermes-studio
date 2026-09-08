@@ -23,6 +23,7 @@ import {
   setSessionArchived as localSetSessionArchived,
   setSessionPushEnabled as localSetSessionPushEnabled,
   createSession as localCreateSession,
+  createBranchedSession as localCreateBranchedSession,
   addMessages as localAddMessages,
   updateSession as localUpdateSession,
   updateSessionStats as localUpdateSessionStats,
@@ -1277,6 +1278,104 @@ export async function importHermesSession(ctx: any) {
   })
 
   ctx.body = { ok: true, imported: true, session: localGetSessionDetail(detail.id) }
+}
+
+function generateWebContinuationSessionId(): string {
+  const now = new Date()
+  const timestamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    '_',
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('')
+  return `${timestamp}_${Math.random().toString(16).slice(2, 8)}`
+}
+
+/**
+ * Copy a readable channel conversation into a new Web-owned session. The
+ * original channel session remains active and continues to be routed by its
+ * gateway; the child uses the normal Web Bridge identity path.
+ */
+export async function continueHermesSessionInWeb(ctx: any) {
+  const sessionId = String(ctx.params.id || '').trim()
+  const profile = requestedProfile(ctx) || getActiveProfileName()
+  const ownerUserId = ctx.state?.user?.id
+  if (ownerUserId == null) {
+    ctx.status = 401
+    ctx.body = { error: 'Authentication required' }
+    return
+  }
+  if (!canAccessProfile(ctx, profile)) {
+    ctx.status = 403
+    ctx.body = { error: `Profile "${profile || 'default'}" is not available for this user` }
+    return
+  }
+
+  const local = localGetSessionDetail(sessionId)
+  let detail: any = null
+  if (isHermesAgentAvailable()) {
+    try {
+      detail = await getHermesSessionDetailForProfile(sessionId, profile)
+    } catch (err) {
+      logger.warn({ err, sessionId, profile }, 'Hermes Session: Web continuation query failed')
+    }
+  }
+  detail ||= local
+  if (!detail || String(detail.profile || profile) !== profile) {
+    ctx.status = 404
+    ctx.body = { error: 'Session not found' }
+    return
+  }
+
+  const readableDetail = await enrichWithAncestorIdentity({ ...detail, profile }, profile)
+  if (denySessionAccess(ctx, readableDetail)) return
+  if (!isChannelSession(readableDetail)) {
+    ctx.status = 400
+    ctx.body = { error: 'Only channel sessions can be continued in Web UI' }
+    return
+  }
+
+  const webSessionId = generateWebContinuationSessionId()
+  const copiedMessages = buildImportMessages(
+    webSessionId,
+    Array.isArray(readableDetail.messages) ? readableDetail.messages : [],
+  ).map(({ session_id: _sessionId, ...message }) => message)
+  if (copiedMessages.length === 0) {
+    ctx.status = 400
+    ctx.body = { error: 'Channel session has no conversation messages' }
+    return
+  }
+
+  const profileDefault = await getProfileDefaultModel(profile)
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const created = localCreateBranchedSession({
+    id: webSessionId,
+    profile,
+    source: 'cli',
+    agent: 'hermes',
+    model: profileDefault.model,
+    provider: profileDefault.provider,
+    title: readableDetail.title || undefined,
+    parent_session_id: sessionId,
+    workspace: readableDetail.workspace || local?.workspace || null,
+    category_id: local?.category_id ?? null,
+    owner_user_id: Number(ownerUserId),
+    preserve_parent: true,
+    ended_at: nowSeconds,
+    last_active: nowSeconds,
+    messages: copiedMessages,
+  })
+  if (!created) {
+    ctx.status = 500
+    ctx.body = { error: 'Failed to create Web continuation' }
+    return
+  }
+
+  ctx.status = 201
+  ctx.body = { ok: true, session: localGetSessionDetail(webSessionId) || created }
 }
 
 export async function remove(ctx: any) {

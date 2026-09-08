@@ -120,4 +120,25 @@ describe('createBranchedSession', () => {
       null,
     )
   })
+
+  it('keeps the parent session active when creating an independent web continuation', async () => {
+    const { createBranchedSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
+
+    createBranchedSession({
+      parent_session_id: 'feishu-session',
+      id: 'web-session',
+      profile: 'default',
+      source: 'cli',
+      owner_user_id: 7,
+      preserve_parent: true,
+      ended_at: 123,
+      last_active: 123,
+      messages: [
+        { role: 'user', content: 'hello from feishu', timestamp: 100 },
+      ],
+    })
+
+    expect(mocks.updateParentRun).not.toHaveBeenCalled()
+    expect(mocks.insertSessionRun.mock.calls[0]?.[19]).toBe(7)
+  })
 })

@@ -162,6 +162,7 @@ const defaultGroupRooms = [
 ]
 
 async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms = defaultGroupRooms) {
+  let webContinuation: ReturnType<typeof detailFor> = null
   await page.route('**/*', async (route: Route) => {
     const request = route.request()
     const url = new URL(request.url())
@@ -179,7 +180,7 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
     if (pathname === '/api/hermes/runtime-versions/jobs' && request.method() === 'GET') return json({ jobs: [] })
     if (pathname === '/api/hermes/available-models') return json({ default: 'test-model', default_provider: 'test-provider', groups: [TEST_MODEL_GROUP], allProviders: [TEST_MODEL_GROUP], model_aliases: {}, model_visibility: {} })
     if (pathname === '/api/hermes/profiles') return json({ profiles: [{ name: 'default', active: true, model: 'test-model', gateway: 'test' }] })
-    if (pathname === '/api/studio/sessions') return json({ sessions: [] })
+    if (pathname === '/api/studio/sessions') return json({ sessions: webContinuation ? [webContinuation] : [] })
     if (pathname === '/api/studio/group-chat/rooms') {
       const offset = Number(url.searchParams.get('offset') || 0)
       const limit = Number(url.searchParams.get('limit') || 50)
@@ -255,6 +256,19 @@ async function mockHistoryApi(page: Page, sessions = historySessions, groupRooms
         : json({ error: 'Session not found' }, 404)
     }
 
+    const continueMatch = pathname.match(/^\/api\/studio\/sessions\/hermes\/([^/]+)\/continue-in-web$/)
+    if (continueMatch && request.method() === 'POST') {
+      const detail = detailFor(decodeURIComponent(continueMatch[1]), sessions)
+      if (!detail) return json({ error: 'Session not found' }, 404)
+      webContinuation = {
+        ...detail,
+        id: 'web-continuation',
+        source: 'cli',
+        parent_session_id: detail.id,
+      }
+      return json({ ok: true, session: webContinuation })
+    }
+
     return json({ error: `Unexpected mocked route: ${request.method()} ${pathname}` }, 404)
   })
 }
@@ -274,13 +288,28 @@ test.describe('history session deep links', () => {
     await expect(page).toHaveURL(/#\/hermes\/history\/session\/hist-beta$/)
   })
 
-  test('channel history session can continue inline without leaving history', async ({ page }) => {
+  test('channel history session continues as an independent Web conversation after confirmation', async ({ page }) => {
     await page.goto('/#/hermes/history/session/hist-feishu')
 
     await expect(page.getByText('Feishu History Session').first()).toBeVisible()
     await expect(page.getByText('Answer from Feishu History Session')).toBeVisible()
-    await expect(page.locator('textarea.input-textarea')).toBeVisible()
+    await expect(page.locator('textarea.input-textarea')).toHaveCount(0)
+    const continueButton = page.getByRole('button', { name: 'Continue in Web UI' })
+    await expect(continueButton).toBeVisible()
+
+    await continueButton.click()
+    const dialog = page.getByRole('dialog')
+    await expect(dialog.getByText('Continue in Web UI?')).toBeVisible()
+    await expect(dialog.getByText('Messages sent in the new Web conversation will not be sent back to Feishu.')).toBeVisible()
     await expect(page).toHaveURL(/#\/hermes\/history\/session\/hist-feishu$/)
+
+    const continueRequest = page.waitForRequest(request =>
+      request.method() === 'POST'
+      && new URL(request.url()).pathname === '/api/studio/sessions/hermes/hist-feishu/continue-in-web',
+    )
+    await dialog.getByRole('button', { name: 'Create Web conversation' }).click()
+    await continueRequest
+    await expect(page).toHaveURL(/#\/hermes\/session\/web-continuation\?profile=default$/)
   })
 
   test('completed tool runs can expand and collapse in history', async ({ page }) => {

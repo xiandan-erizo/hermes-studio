@@ -1,27 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useChatStore, type Session } from '@/stores/hermes/chat'
+import { type Session } from '@/stores/hermes/chat'
 import { useAppStore } from '@/stores/hermes/app'
 import { useProfilesStore } from '@/stores/hermes/profiles'
 import { useSessionBrowserPrefsStore } from '@/stores/hermes/session-browser-prefs'
-import { NButton, NDropdown, NPopconfirm, NTooltip, useMessage, type DropdownOption } from 'naive-ui'
+import { NButton, NDropdown, NPopconfirm, NTooltip, useDialog, useMessage, type DropdownOption } from 'naive-ui'
 import { useI18n } from 'vue-i18n'
 import { getSourceLabel } from '@/shared/session-display'
 import { copyToClipboard } from '@/utils/clipboard'
 import HistoryMessageList from '@/components/hermes/chat/HistoryMessageList.vue'
-import MessageList from '@/components/hermes/chat/MessageList.vue'
-import ChatInput from '@/components/hermes/chat/ChatInput.vue'
 import SessionListItem from '@/components/hermes/chat/SessionListItem.vue'
 import OutlinePanel from '@/components/hermes/chat/OutlinePanel.vue'
 import PageSidebarNav from '@/components/layout/PageSidebarNav.vue'
 import PageSidebarFooter from '@/components/layout/PageSidebarFooter.vue'
-import { batchDeleteSessions, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
+import { batchDeleteSessions, continueHermesSessionInWeb, deleteSession, fetchHermesSessionGroups, fetchHermesSessionPage, fetchHermesSession, fetchSessionMessagesPage, importHermesSession, unarchiveSession, type HermesMessage, type SessionSummary } from '@/api/studio/sessions'
 
 const appStore = useAppStore()
-const chatStore = useChatStore()
 const profilesStore = useProfilesStore()
 const sessionBrowserPrefsStore = useSessionBrowserPrefsStore()
+const dialog = useDialog()
 const message = useMessage()
 const { t } = useI18n()
 const route = useRoute()
@@ -47,12 +45,11 @@ const hermesSessionsLoaded = ref(false)
 const historySessionId = ref<string | null>(null)
 const historySession = ref<Session | null>(null)
 const showOutline = ref(false)
-const historyMessageListRef = ref<{
-  scrollToAnchor: (messageId: string, anchorId: string) => void
-} | null>(null)
+const historyMessageListRef = ref<InstanceType<typeof HistoryMessageList> | null>(null)
 const isBatchMode = ref(false)
 const isBatchDeleting = ref(false)
 const showBatchDeleteConfirm = ref(false)
+const isContinuingInWeb = ref(false)
 const selectedSessionKeys = ref<Set<string>>(new Set())
 const contextSessionId = ref<string | null>(null)
 const showContextMenu = ref(false)
@@ -337,27 +334,20 @@ async function loadOlderHistoryMessages(sessionId: string): Promise<boolean> {
 }
 
 const CHANNEL_SOURCES = ['feishu', 'dingtalk', 'weixin', 'wecom', 'webhook']
-let inlineChannelActivationRequestId = 0
+const autoImportedChannelSessions = new Set<string>()
 
 function isChannelHistorySession(session: { source?: string | null } | null | undefined): boolean {
   return CHANNEL_SOURCES.includes(String(session?.source || '').toLowerCase())
 }
 
-async function activateInlineChannelChat(
-  summary: SessionSummary,
-  profile: string | null,
-  requestId: number,
-): Promise<void> {
-  try {
-    await importHermesSession(summary.id, profile)
-    if (requestId !== inlineChannelActivationRequestId || routeSessionId.value !== summary.id) return
-    chatStore.setRuntimeMode('default')
-    chatStore.setSessionProfileFilter(profile || summary.profile || 'default')
-    const snapshot = historySession.value?.id === summary.id ? historySession.value : null
-    await chatStore.loadSessions(profile || summary.profile || null, summary.id, snapshot)
-  } catch (err) {
-    console.error('Failed to activate inline channel chat:', err)
-  }
+function maybeAutoImportChannelSession(summary: { id: string; source?: string | null; profile?: string | null }) {
+  if (!isChannelHistorySession(summary)) return
+  const key = `${summary.profile || 'default'}:${summary.id}`
+  if (autoImportedChannelSessions.has(key)) return
+  autoImportedChannelSessions.add(key)
+  void importHermesSession(summary.id, summary.profile || null).catch(() => {
+    autoImportedChannelSessions.delete(key)
+  })
 }
 
 async function handleSessionClick(sessionId: string, profile?: string | null) {
@@ -392,7 +382,6 @@ async function openDefaultHistorySession(replace = false) {
 }
 
 async function syncRouteSession() {
-  const activationRequestId = ++inlineChannelActivationRequestId
   const sessionId = routeSessionId.value
   if (!sessionId) return
 
@@ -403,6 +392,8 @@ async function syncRouteSession() {
     await router.replace({ name: 'hermes.history' })
     return
   }
+
+  maybeAutoImportChannelSession(summary)
 
   if (collapsedGroups.value.has(summary.source)) {
     collapsedGroups.value = new Set([...collapsedGroups.value].filter(source => source !== summary.source))
@@ -415,9 +406,6 @@ async function syncRouteSession() {
     historySessionId.value = sessionId
     historySession.value = null
     await loadHistorySession(sessionId, sessionProfile)
-  }
-  if (isChannelHistorySession(summary)) {
-    void activateInlineChannelChat(summary, sessionProfile, activationRequestId)
   }
 }
 
@@ -691,22 +679,15 @@ watch(hermesSessionsLoaded, (loaded) => {
   }
 }, { once: true })
 
-const inlineChannelSession = computed(() => {
-  if (!isChannelHistorySession(historySession.value)) return null
-  return chatStore.activeSession?.id === historySession.value?.id
-    ? chatStore.activeSession
-    : null
-})
-
-const displayedSession = computed(() => inlineChannelSession.value || historySession.value)
-
 const activeSessionTitle = computed(() =>
-  displayedSession.value?.title || t('chat.newChat'),
+  historySession.value?.title || t('chat.newChat'),
 )
 
 const activeSessionSource = computed(() =>
-  displayedSession.value?.source || '',
+  historySession.value?.source || '',
 )
+
+const canContinueCurrentSessionInWeb = computed(() => isChannelHistorySession(historySession.value))
 
 async function copySessionId(id?: string) {
   const sessionId = id || historySessionId.value
@@ -768,6 +749,36 @@ async function handleImportToWebUi(sessionId: string) {
   message.error(t('chat.importSessionFailed'))
 }
 
+async function createWebContinuation(summary: { id: string; source?: string | null; profile?: string | null }) {
+  if (isContinuingInWeb.value) return
+  isContinuingInWeb.value = true
+  try {
+    const result = await continueHermesSessionInWeb(summary.id, summary.profile || routeProfile.value)
+    await router.push({
+      name: 'hermes.session',
+      params: { sessionId: result.session.id },
+      query: result.session.profile ? { profile: result.session.profile } : undefined,
+    })
+  } catch (err) {
+    console.error('Failed to create Web continuation:', err)
+    message.error(t('chat.continueInWebUiFailed'))
+  } finally {
+    isContinuingInWeb.value = false
+  }
+}
+
+function confirmContinueInWeb(summary: { id: string; source?: string | null; profile?: string | null } | null | undefined) {
+  if (!summary || !isChannelHistorySession(summary)) return
+  const source = getSourceLabel(String(summary.source || ''))
+  dialog.warning({
+    title: t('chat.continueInWebUiTitle'),
+    content: t('chat.continueInWebUiWarning', { source }),
+    positiveText: t('chat.createWebConversation'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => createWebContinuation(summary),
+  })
+}
+
 async function handleContextMenuSelect(key: string) {
   showContextMenu.value = false
   if (!contextSessionId.value) return
@@ -780,20 +791,7 @@ async function handleContextMenuSelect(key: string) {
   } else if (key === 'import-webui') {
     await handleImportToWebUi(contextSessionId.value)
   } else if (key === 'continue-webui') {
-    const summary = contextSessionSummary.value
-    const sessionId = contextSessionId.value
-    if (!sessionId || !summary) return
-    try {
-      // Idempotent: ensures the local snapshot exists before routing to chat.
-      await importHermesSession(sessionId, summary.profile || null)
-    } catch {
-      // Already imported or transient failure — the chat view can still load.
-    }
-    await router.push({
-      name: 'hermes.session',
-      params: { sessionId },
-      query: summary.profile ? { profile: summary.profile } : undefined,
-    })
+    confirmContinueInWeb(contextSessionSummary.value)
   } else if (key === 'unarchive') {
     const summary = contextSessionSummary.value
     if (!summary?.is_archived) return
@@ -1077,9 +1075,19 @@ function handleBatchDeleteConfirm() {
           </NButton>
           <span class="header-session-title">{{ activeSessionTitle }}</span>
           <span v-if="activeSessionSource" class="source-badge">{{ getSourceLabel(activeSessionSource) }}</span>
-          <span v-if="displayedSession?.workspace" class="workspace-badge" :title="displayedSession.workspace">📁 {{ displayedSession.workspace.split('/').pop() || displayedSession.workspace }}</span>
+          <span v-if="historySession?.workspace" class="workspace-badge" :title="historySession.workspace">📁 {{ historySession.workspace.split('/').pop() || historySession.workspace }}</span>
         </div>
         <div class="header-actions">
+          <NButton
+            v-if="canContinueCurrentSessionInWeb"
+            type="primary"
+            secondary
+            size="small"
+            :loading="isContinuingInWeb"
+            @click="confirmContinueInWeb(historySession)"
+          >
+            {{ t('chat.continueInWebUi') }}
+          </NButton>
           <NTooltip trigger="hover">
             <template #trigger>
               <NButton quaternary size="small" @click="showOutline = !showOutline" circle>
@@ -1105,28 +1113,17 @@ function handleBatchDeleteConfirm() {
 
       <div class="history-content-wrapper">
         <div class="history-main-content">
-          <MessageList
-            v-if="inlineChannelSession"
-            ref="historyMessageListRef"
-            scroll-scope="history-channel-chat"
-          />
           <HistoryMessageList
-            v-else
             :key="historySession?.id || 'history-empty'"
             ref="historyMessageListRef"
             :session="historySession"
             :load-older="loadOlderHistoryMessages"
             scroll-scope="history"
           />
-          <ChatInput
-            v-if="inlineChannelSession"
-            :model-label="inlineChannelSession.model || ''"
-            :model-disabled="true"
-          />
         </div>
         <OutlinePanel
-          v-if="showOutline && displayedSession"
-          :messages="displayedSession.messages || []"
+          v-if="showOutline && historySession"
+          :messages="historySession.messages || []"
           @navigate="handleOutlineNavigate"
         />
       </div>

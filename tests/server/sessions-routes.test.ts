@@ -13,6 +13,7 @@ const listHermesSessionsMock = vi.fn(async (ctx: any) => { ctx.body = { sessions
 const listHermesSessionGroupsMock = vi.fn(async (ctx: any) => { ctx.body = { groups: [] } })
 const getHermesSessionMock = vi.fn(async (ctx: any) => { ctx.body = { session: { id: ctx.params.id } } })
 const importHermesSessionMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id } })
+const continueHermesSessionInWebMock = vi.fn(async (ctx: any) => { ctx.body = { session: { id: 'web-session' } } })
 const searchMock = vi.fn(async (ctx: any) => { ctx.body = { results: [{ id: 'search-1' }] } })
 const getMock = vi.fn(async (ctx: any) => { ctx.body = { session: { id: ctx.params.id } } })
 const getContextMock = vi.fn(async (ctx: any) => { ctx.body = { session_id: ctx.params.id, messages: [] } })
@@ -62,6 +63,7 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
   listHermesSessionGroups: listHermesSessionGroupsMock,
   getHermesSession: getHermesSessionMock,
   importHermesSession: importHermesSessionMock,
+  continueHermesSessionInWeb: continueHermesSessionInWebMock,
   search: searchMock,
   get: getMock,
   getContext: getContextMock,
@@ -114,6 +116,7 @@ describe('session routes', () => {
     listHermesSessionGroupsMock.mockClear()
     getHermesSessionMock.mockClear()
     importHermesSessionMock.mockClear()
+    continueHermesSessionInWebMock.mockClear()
     searchMock.mockClear()
     getMock.mockClear()
     getContextMock.mockClear()
@@ -158,6 +161,7 @@ describe('session routes', () => {
       '/api/studio/sessions/hermes/groups',
       '/api/studio/sessions/hermes/:id',
       '/api/studio/sessions/hermes/:id/import',
+      '/api/studio/sessions/hermes/:id/continue-in-web',
       '/api/studio/search/sessions',
       '/api/studio/sessions/search',
       '/api/studio/sessions/usage',
@@ -388,6 +392,18 @@ describe('session routes', () => {
 
     expect(importHermesSessionMock).toHaveBeenCalledWith(ctx)
     expect(ctx.body).toEqual({ session_id: 'hermes-abc' })
+  })
+
+  it('delegates Hermes Web continuation to the controller', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    const layer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/hermes/:id/continue-in-web')
+    expect(layer).toBeTruthy()
+    const ctx: any = { params: { id: 'hermes-abc' }, query: { profile: 'default' }, body: null }
+
+    await layer.stack[0](ctx)
+
+    expect(continueHermesSessionInWebMock).toHaveBeenCalledWith(ctx)
+    expect(ctx.body).toEqual({ session: { id: 'web-session' } })
   })
 
   it('delegates session export to the controller', async () => {

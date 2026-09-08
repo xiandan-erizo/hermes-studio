@@ -288,6 +288,8 @@ export function createBranchedSession(data: {
   user_id?: string | number | null
   /** Studio authorization subject (the forking user). */
   owner_user_id?: number | null
+  /** Keep an externally routed parent active while creating an independent child. */
+  preserve_parent?: boolean
   model?: string
   provider?: string
   api_mode?: string
@@ -325,9 +327,11 @@ export function createBranchedSession(data: {
 
   db.exec('BEGIN')
   try {
-    db.prepare(
-      `UPDATE ${SESSIONS_TABLE} SET ended_at = ?, end_reason = ? WHERE id = ?`,
-    ).run(data.ended_at, 'branched', data.parent_session_id)
+    if (!data.preserve_parent) {
+      db.prepare(
+        `UPDATE ${SESSIONS_TABLE} SET ended_at = ?, end_reason = ? WHERE id = ?`,
+      ).run(data.ended_at, 'branched', data.parent_session_id)
+    }
 
     db.prepare(
       `INSERT INTO ${SESSIONS_TABLE} (id, profile, source, agent, agent_mode, agent_session_id, agent_native_session_id, user_id, model, provider, api_mode, reasoning_effort, title, parent_session_id, started_at, last_active, workspace, category_id, message_count, owner_user_id, ownership_state, ownership_resolution, origin_session_id, origin_source)

@@ -1664,11 +1664,7 @@ export const useChatStore = defineStore('chat', () => {
     return mapped
   }
 
-  async function loadSessions(
-    profile?: string | null,
-    preferredSessionId?: string | null,
-    preferredSessionSnapshot?: Session | null,
-  ) {
+  async function loadSessions(profile?: string | null, preferredSessionId?: string | null) {
     const requestSequence = ++loadSessionsRequestSequence
     const selectionSequence = activeSelectionSequence
     isLoadingSessions.value = true
@@ -1684,16 +1680,6 @@ export const useChatStore = defineStore('chat', () => {
         }
       }
       const fresh = list.map(mapHermesSession)
-      const preferred = preferredSessionSnapshot?.id === preferredSessionId
-        ? fresh.find(session => session.id === preferredSessionId)
-        : null
-      if (preferred && preferredSessionSnapshot) {
-        preferred.messages = preferredSessionSnapshot.messages
-        preferred.loadedMessageCount = preferredSessionSnapshot.loadedMessageCount
-        preferred.messageTotal = preferredSessionSnapshot.messageTotal
-        preferred.hasMoreBefore = preferredSessionSnapshot.hasMoreBefore
-        preferred.contextTokens = preferredSessionSnapshot.contextTokens
-      }
       const selectionChanged = selectionSequence !== activeSelectionSequence
       const explicitlySelectedSession = selectionChanged && activeSessionId.value
         ? sessions.value.find(session => session.id === activeSessionId.value) || activeSession.value

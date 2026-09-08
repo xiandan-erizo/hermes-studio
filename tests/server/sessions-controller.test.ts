@@ -24,6 +24,7 @@ const localRenameSessionMock = vi.fn()
 const localSetSessionArchivedMock = vi.fn()
 const localSetSessionPushEnabledMock = vi.fn()
 const localCreateSessionMock = vi.fn()
+const localCreateBranchedSessionMock = vi.fn()
 const localUpdateSessionMock = vi.fn()
 const localAddMessagesMock = vi.fn()
 const localUpdateSessionStatsMock = vi.fn()
@@ -103,6 +104,7 @@ vi.mock('../../packages/server/src/modules/studio/repositories/session-store', (
   setSessionArchived: localSetSessionArchivedMock,
   setSessionPushEnabled: localSetSessionPushEnabledMock,
   createSession: localCreateSessionMock,
+  createBranchedSession: localCreateBranchedSessionMock,
   addMessages: localAddMessagesMock,
   getSession: getSessionMock,
   updateSession: localUpdateSessionMock,
@@ -266,6 +268,11 @@ describe('session conversations controller', () => {
     localSetSessionArchivedMock.mockReset()
     localSetSessionPushEnabledMock.mockReset()
     localCreateSessionMock.mockReset()
+    localCreateBranchedSessionMock.mockReset()
+    localCreateBranchedSessionMock.mockImplementation((input: any) => ({
+      ...input,
+      fork_point_message_id: '42',
+    }))
     localUpdateSessionMock.mockReset()
     localAddMessagesMock.mockReset()
     localUpdateSessionStatsMock.mockReset()
@@ -2347,6 +2354,85 @@ describe('session conversations controller', () => {
       user_id: 'ou_feishu_open_id',
     }))
     expect(ctx.body).toMatchObject({ ok: true, imported: true })
+  })
+
+  it('copies a readable channel session into a Web-owned continuation', async () => {
+    const hermesDetail = {
+      id: 'feishu-session',
+      profile: 'default',
+      source: 'feishu',
+      user_id: 'ou_feishu_open_id',
+      model: 'old-model',
+      provider: 'old-provider',
+      title: 'Feishu chat',
+      started_at: 100,
+      ended_at: null,
+      last_active: 200,
+      message_count: 2,
+      tool_call_count: 0,
+      messages: [
+        { id: 1, session_id: 'feishu-session', role: 'user', content: 'hello', timestamp: 100 },
+        { id: 2, session_id: 'feishu-session', role: 'assistant', content: 'hi', timestamp: 101 },
+      ],
+    }
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue(hermesDetail)
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'feishu-session' },
+      query: { profile: 'default' },
+      state: { user: { id: 7, role: 'super_admin' } },
+      body: null,
+    }
+
+    await mod.continueHermesSessionInWeb(ctx)
+
+    expect(ctx.body).toMatchObject({
+      ok: true,
+      session: {
+        profile: 'default',
+        source: 'cli',
+        owner_user_id: 7,
+        parent_session_id: 'feishu-session',
+      },
+    })
+    expect(ctx.body.session.id).toMatch(/^\d{8}_\d{6}_[0-9a-f]{6}$/)
+    expect(localCreateBranchedSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'cli',
+      agent: 'hermes',
+      owner_user_id: 7,
+      parent_session_id: 'feishu-session',
+      preserve_parent: true,
+      model: 'gpt-default',
+      provider: 'openai',
+      messages: [
+        expect.objectContaining({ role: 'user', content: 'hello' }),
+        expect.objectContaining({ role: 'assistant', content: 'hi' }),
+      ],
+    }))
+  })
+
+  it('rejects Web continuation for a non-channel session', async () => {
+    getSessionDetailFromDbWithProfileMock.mockResolvedValue({
+      id: 'cli-session',
+      profile: 'default',
+      source: 'cli',
+      messages: [{ role: 'user', content: 'hello', timestamp: 100 }],
+    })
+
+    const mod = await import('../../packages/server/src/modules/studio/controllers/sessions')
+    const ctx: any = {
+      params: { id: 'cli-session' },
+      query: { profile: 'default' },
+      state: { user: { id: 7, role: 'super_admin' } },
+      body: null,
+    }
+
+    await mod.continueHermesSessionInWeb(ctx)
+
+    expect(ctx.status).toBe(400)
+    expect(ctx.body).toEqual({ error: 'Only channel sessions can be continued in Web UI' })
+    expect(localCreateBranchedSessionMock).not.toHaveBeenCalled()
   })
 
   describe('exportSession', () => {

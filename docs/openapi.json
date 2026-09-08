@@ -780,6 +780,376 @@
         }
       }
     },
+    "/api/auth/external-identities": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get external-identities",
+        "description": "GET /api/auth/external-identities",
+        "operationId": "listMappings",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create external-identities",
+        "description": "POST /api/auth/external-identities",
+        "operationId": "createMapping",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "external_id": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "note": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "source": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "user_id": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "external_id"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/external-identities/candidates": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get candidates",
+        "description": "GET /api/auth/external-identities/candidates",
+        "operationId": "listCandidates",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/auth/external-identities/users": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get users",
+        "description": "GET /api/auth/external-identities/users",
+        "operationId": "listMappingUsers",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/api/auth/external-identities/{id}": {
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Delete :id",
+        "description": "DELETE /api/auth/external-identities/:id",
+        "operationId": "removeMapping",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ]
+      }
+    },
+    "/api/auth/invites": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get invites",
+        "description": "GET /api/auth/invites",
+        "operationId": "listInviteRecords",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create invites",
+        "description": "POST /api/auth/invites",
+        "operationId": "createInviteRecord",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expiresInDays": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "maxUses": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "profile": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "profile_name": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": [
+                  "profile"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/invites/{code}": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get :code",
+        "description": "GET /api/auth/invites/:code",
+        "operationId": "getInviteInfo",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Delete :code",
+        "description": "DELETE /api/auth/invites/:code",
+        "operationId": "revokeInviteRecord",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/auth/invites/{code}/accept": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Create accept",
+        "description": "POST /api/auth/invites/:code/accept",
+        "operationId": "acceptInvite",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "username": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/locked-ips": {
       "get": {
         "tags": [
@@ -1024,6 +1394,133 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/api/auth/sso/callback": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get callback",
+        "description": "GET /api/auth/sso/callback",
+        "operationId": "ssoCallback",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string",
+                "access_denied"
+              ]
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/auth/sso/redirect": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get redirect",
+        "description": "GET /api/auth/sso/redirect",
+        "operationId": "ssoRedirect",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "invite",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "string"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/auth/sso/status": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get status",
+        "description": "GET /api/auth/sso/status",
+        "operationId": "ssoStatus",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
           }
         }
       }
@@ -15262,22 +15759,6 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
           }
         ]
       }
@@ -15436,6 +15917,42 @@
           },
           "404": {
             "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/hermes/{id}/continue-in-web": {
+      "post": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Create continue-in-web",
+        "description": "POST /api/studio/sessions/hermes/:id/continue-in-web",
+        "operationId": "continueHermesSessionInWeb",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         },
         "parameters": [
@@ -15818,6 +16335,42 @@
               "enum": [
                 "compressed"
               ]
+            }
+          }
+        ]
+      }
+    },
+    "/api/studio/sessions/{id}/identity": {
+      "get": {
+        "tags": [
+          "Sessions"
+        ],
+        "summary": "Get identity",
+        "description": "GET /api/studio/sessions/:id/identity",
+        "operationId": "getSessionIdentity",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ]

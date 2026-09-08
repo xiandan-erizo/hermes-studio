@@ -479,6 +479,16 @@ export async function importHermesSession(id: string, profile?: string | null): 
   )
 }
 
+export async function continueHermesSessionInWeb(id: string, profile?: string | null): Promise<{ ok: boolean; session: SessionDetail }> {
+  const params = new URLSearchParams()
+  if (profile) params.set('profile', profile)
+  const query = params.toString()
+  return request<{ ok: boolean; session: SessionDetail }>(
+    `/api/studio/sessions/hermes/${encodeURIComponent(id)}/continue-in-web${query ? `?${query}` : ''}`,
+    { method: 'POST' },
+  )
+}
+
 export interface BatchDeleteSessionTarget {
   id: string
   profile?: string | null
