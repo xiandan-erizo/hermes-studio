@@ -212,6 +212,77 @@ describe('skills controller', () => {
     }
   })
 
+  it('returns only command-picker fields when a plain user lists profile skills', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-user-skills-'))
+    const profileDir = join(root, 'profile')
+    const skillDir = join(profileDir, 'skills', 'tools', 'visible-skill')
+    const disabledSkillDir = join(profileDir, 'skills', 'tools', 'disabled-skill')
+    const archivedSkillDir = join(profileDir, 'skills', '.archive', 'archived-skill')
+    await mkdir(skillDir, { recursive: true })
+    await mkdir(disabledSkillDir, { recursive: true })
+    await mkdir(archivedSkillDir, { recursive: true })
+    await writeFile(join(skillDir, 'SKILL.md'), '# Visible Skill\nSafe description\n', 'utf-8')
+    await writeFile(join(disabledSkillDir, 'SKILL.md'), '# Disabled Skill\nDo not list\n', 'utf-8')
+    await writeFile(join(archivedSkillDir, 'SKILL.md'), '# Archived Skill\nDo not list\n', 'utf-8')
+    mockGetProfileDir.mockReturnValue(profileDir)
+    mockReadConfigYamlForProfile.mockResolvedValue({ skills: { disabled: ['disabled-skill'] } })
+
+    try {
+      const { list } = await loadController()
+      const ctx: any = {
+        query: {},
+        state: {
+          user: { id: 7, username: 'member', role: 'user' },
+          profile: { name: 'research' },
+        },
+        body: null,
+      }
+
+      await list(ctx)
+
+      expect(ctx.body).toEqual({
+        categories: [{
+          name: 'tools',
+          description: '',
+          skills: [{
+            name: 'visible-skill',
+            description: 'Safe description',
+            enabled: true,
+            source: 'local',
+          }],
+        }],
+        archived: [],
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('requires an authorized Hermes profile when a plain user lists skills', async () => {
+    const { list } = await loadController()
+    const missingProfileCtx: any = {
+      query: {},
+      state: { user: { id: 7, username: 'member', role: 'user' } },
+      body: null,
+    }
+    const codingTargetCtx: any = {
+      query: { target: 'codex' },
+      state: {
+        user: { id: 7, username: 'member', role: 'user' },
+        profile: { name: 'research' },
+      },
+      body: null,
+    }
+
+    await list(missingProfileCtx)
+    await list(codingTargetCtx)
+
+    expect(missingProfileCtx.status).toBe(400)
+    expect(missingProfileCtx.body).toEqual({ error: 'Profile is required' })
+    expect(codingTargetCtx.status).toBe(403)
+    expect(codingTargetCtx.body).toEqual({ error: 'Only Hermes profile skills are available for this account' })
+  })
+
   it('lists flat symlinked skills in the misc category', async () => {
     const root = await mkdtemp(join(tmpdir(), 'hermes-web-ui-symlink-flat-skill-'))
     const profileDir = join(root, 'profile')

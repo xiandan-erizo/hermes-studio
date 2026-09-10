@@ -89,7 +89,7 @@ function mountForSession(
   sessionId: string,
   sessionOverrides: Partial<ReturnType<typeof useChatStore>['sessions'][number]> = {},
   displayOverrides: Record<string, any> = {},
-  componentProps: { initialText?: string; persistDraft?: boolean } = {},
+  componentProps: { initialText?: string; persistDraft?: boolean; plainUser?: boolean } = {},
 ) {
   const pinia = createTestingPinia({ stubActions: false, createSpy: vi.fn })
   const chatStore = useChatStore()
@@ -481,5 +481,40 @@ describe('ChatInput draft persistence', () => {
     await nextTick()
 
     expect(wrapper.find('.slash-command-dropdown').exists()).toBe(false)
+  })
+
+  it('limits plain users to new, compact, and skills shortcuts', async () => {
+    const wrapper = mountForSession('session-plain-user', {}, {}, { plainUser: true })
+    const textarea = wrapper.get('textarea')
+
+    await textarea.setValue('/')
+    await nextTick()
+
+    expect(wrapper.findAll('.slash-command-name').map(item => item.text())).toEqual([
+      '/new',
+      '/compact',
+      '/skills',
+    ])
+
+    await wrapper.findAll('.slash-command-item')[0].trigger('mousedown')
+    expect(wrapper.emitted('newChat')).toHaveLength(1)
+  })
+
+  it('keeps only applicable plain-user shortcuts on a historical coding session', async () => {
+    const wrapper = mountForSession(
+      'session-plain-user-coding',
+      { source: 'coding_agent', agent: 'codex', codingAgentId: 'codex' },
+      {},
+      { plainUser: true },
+    )
+    const textarea = wrapper.get('textarea')
+
+    await textarea.setValue('/')
+    await nextTick()
+
+    expect(wrapper.findAll('.slash-command-name').map(item => item.text())).toEqual([
+      '/new',
+      '/compact',
+    ])
   })
 })

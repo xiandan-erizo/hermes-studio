@@ -72,7 +72,6 @@ export function partitionRecentSessions<T extends RecentSessionAssignment>(
       label,
       sessions: recent,
     },
-    // “最近”是快捷入口，不从真实分类中移除对应会话。
-    remaining: [...sessions],
+    remaining: sessions.filter((session) => !recent.some((item) => item.id === session.id)),
   };
 }

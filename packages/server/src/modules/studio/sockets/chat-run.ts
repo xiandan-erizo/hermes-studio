@@ -230,6 +230,12 @@ function webhookAgentForRun(data?: { coding_agent_id?: string; agent_id?: string
   return 'bridge'
 }
 
+function storedCodingAgentId(agent?: string | null): ChatCodingAgentId | undefined {
+  if (agent === 'codex' || agent === 'pi' || agent === 'ekko-agent') return agent
+  if (agent === 'claude' || agent === 'claude-code') return 'claude-code'
+  return undefined
+}
+
 export interface ChatRunAndWaitResult {
   ok: boolean
   event: 'run.completed' | 'run.failed'
@@ -425,6 +431,75 @@ export class ChatRunSocket {
         socket.emit('run.failed', payload)
         return
       }
+      const storedSession = data.session_id ? getSession(data.session_id) : null
+      if (storedSession && socketUser && !canOperateSession(socketUser, storedSession)) {
+        socket.emit('run.failed', {
+          event: 'run.failed',
+          session_id: data.session_id,
+          queue_id: data.queue_id,
+          error: 'Session is not available for this user',
+        })
+        return
+      }
+      if (socketUser?.role === 'user') {
+        data.baseUrl = undefined
+        data.base_url = undefined
+        data.apiKey = undefined
+        data.api_key = undefined
+        data.apiMode = undefined
+        data.api_mode = undefined
+        data.mcpServers = undefined
+        data.mcp_servers = undefined
+        data.group_system_prompt = undefined
+        data.group_room_id = undefined
+        data.group_agent_id = undefined
+        data.workflow_id = undefined
+        data.workflow_node_id = undefined
+        data.memory_input = undefined
+        data.memory_messages = undefined
+        data.memory_write_policy = undefined
+        data.memory_origin = undefined
+        data.memory_recall_scopes = undefined
+        data.memory_write_scopes = undefined
+        data.memory_default_write_scope = undefined
+
+        if (!storedSession) {
+          data.source = 'cli'
+          data.session_source = undefined
+          data.model = undefined
+          data.provider = undefined
+          data.workspace = null
+          data.category_id = null
+          data.coding_agent_id = undefined
+          data.agent_id = undefined
+          data.mode = undefined
+          data.apiMode = undefined
+          data.api_mode = undefined
+          data.reasoning_effort = undefined
+        } else {
+          data.source = storedSession.source || 'cli'
+          data.session_source = storedSession.source === 'global_agent'
+            || storedSession.source === 'workflow'
+            || storedSession.source === 'group_chat'
+            ? storedSession.source
+            : undefined
+          data.model = storedSession.model || undefined
+          data.provider = storedSession.provider || undefined
+          data.workspace = storedSession.workspace || null
+          data.category_id = storedSession.category_id ?? null
+          data.apiMode = storedSession.api_mode || undefined
+          data.api_mode = undefined
+          data.reasoning_effort = storedSession.reasoning_effort || undefined
+          const codingAgentId = storedSession.source === 'coding_agent'
+            ? storedCodingAgentId(storedSession.agent)
+            : undefined
+          data.coding_agent_id = codingAgentId
+          data.agent_id = undefined
+          data.mode = codingAgentId
+            ? storedSession.agent_mode === 'global' ? 'global' : 'scoped'
+            : undefined
+        }
+      }
       if (data.category_id !== undefined) {
         data.category_id = resolveSessionCategoryId(data.category_id)
       }
@@ -432,6 +507,22 @@ export class ChatRunSocket {
         const state = getOrCreateSession(this.sessionMap, data.session_id)
         const source = resolveRunSource(data.source, data.session_id)
         const command = parseSessionCommand(data.input)
+        if (
+          command
+          && socketUser?.role === 'user'
+          && command.rawName !== 'compact'
+          && command.rawName !== 'skill'
+        ) {
+          socket.emit('session.command', {
+            event: 'session.command',
+            session_id: data.session_id,
+            command: command.rawName,
+            ok: false,
+            action: 'forbidden',
+            message: 'This command is not available for this account.',
+          })
+          return
+        }
         if (command && (isBridgeRunSource(source) || command.name === 'branch')) {
           try {
             const handled = await handleSessionCommand(data.session_id, command, {

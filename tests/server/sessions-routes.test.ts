@@ -101,6 +101,15 @@ vi.mock('../../packages/server/src/modules/studio/controllers/sessions', () => (
 }))
 
 describe('session routes', () => {
+  async function dispatch(layer: any, ctx: any): Promise<void> {
+    const invoke = async (index: number): Promise<void> => {
+      const handler = layer?.stack?.[index]
+      if (!handler) return
+      await handler(ctx, () => invoke(index + 1))
+    }
+    await invoke(0)
+  }
+
   beforeEach(() => {
     vi.resetModules()
     listConversationsMock.mockClear()
@@ -291,21 +300,21 @@ describe('session routes', () => {
     const renameLayer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/workspace/folders/rename')
     const deleteLayer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/workspace/folders' && entry.methods.includes('DELETE'))
 
-    const listCtx: any = { query: {}, request: { body: {} }, body: null, params: {} }
-    await listLayer.stack[0](listCtx)
-    expect(listWorkspaceFoldersMock).toHaveBeenCalledWith(listCtx)
+    const listCtx: any = { state: { user: { role: 'super_admin' } }, query: {}, request: { body: {} }, body: null, params: {} }
+    await dispatch(listLayer, listCtx)
+    expect(listWorkspaceFoldersMock).toHaveBeenCalledWith(listCtx, expect.any(Function))
 
-    const createCtx: any = { query: {}, request: { body: { parentPath: '', name: 'new-folder' } }, body: null, params: {} }
-    await createLayer.stack[0](createCtx)
-    expect(createWorkspaceFolderMock).toHaveBeenCalledWith(createCtx)
+    const createCtx: any = { state: { user: { role: 'super_admin' } }, query: {}, request: { body: { parentPath: '', name: 'new-folder' } }, body: null, params: {} }
+    await dispatch(createLayer, createCtx)
+    expect(createWorkspaceFolderMock).toHaveBeenCalledWith(createCtx, expect.any(Function))
 
-    const renameCtx: any = { query: {}, request: { body: { path: 'old-folder', name: 'new-folder' } }, body: null, params: {} }
-    await renameLayer.stack[0](renameCtx)
-    expect(renameWorkspaceFolderMock).toHaveBeenCalledWith(renameCtx)
+    const renameCtx: any = { state: { user: { role: 'super_admin' } }, query: {}, request: { body: { path: 'old-folder', name: 'new-folder' } }, body: null, params: {} }
+    await dispatch(renameLayer, renameCtx)
+    expect(renameWorkspaceFolderMock).toHaveBeenCalledWith(renameCtx, expect.any(Function))
 
-    const deleteCtx: any = { query: {}, request: { body: { path: 'new-folder' } }, body: null, params: {} }
-    await deleteLayer.stack[0](deleteCtx)
-    expect(deleteWorkspaceFolderMock).toHaveBeenCalledWith(deleteCtx)
+    const deleteCtx: any = { state: { user: { role: 'super_admin' } }, query: {}, request: { body: { path: 'new-folder' } }, body: null, params: {} }
+    await dispatch(deleteLayer, deleteCtx)
+    expect(deleteWorkspaceFolderMock).toHaveBeenCalledWith(deleteCtx, expect.any(Function))
   })
 
   it('delegates session workspace file routes to the controller', async () => {
@@ -320,26 +329,99 @@ describe('session routes', () => {
     const renameLayer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/:id/workspace-file/rename')
     const copyLayer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/:id/workspace-file/copy')
 
-    const ctx: any = { query: {}, request: { body: {} }, body: null, params: { id: 'session-1' } }
-    await listLayer.stack[0](ctx)
-    await diffLayer.stack[0](ctx)
-    await readLayer.stack[0](ctx)
-    await contentLayer.stack[0](ctx)
-    await writeLayer.stack[0](ctx)
-    await mkdirLayer.stack[0](ctx)
-    await deleteLayer.stack[0](ctx)
-    await renameLayer.stack[0](ctx)
-    await copyLayer.stack[0](ctx)
+    const ctx: any = { state: { user: { role: 'super_admin' } }, query: {}, request: { body: {} }, body: null, params: { id: 'session-1' } }
+    await dispatch(listLayer, ctx)
+    await dispatch(diffLayer, ctx)
+    await dispatch(readLayer, ctx)
+    await dispatch(contentLayer, ctx)
+    await dispatch(writeLayer, ctx)
+    await dispatch(mkdirLayer, ctx)
+    await dispatch(deleteLayer, ctx)
+    await dispatch(renameLayer, ctx)
+    await dispatch(copyLayer, ctx)
 
-    expect(listWorkspaceFilesMock).toHaveBeenCalledWith(ctx)
-    expect(diffWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(readWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(readWorkspaceFileContentMock).toHaveBeenCalledWith(ctx)
-    expect(writeWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(mkdirWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(deleteWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(renameWorkspaceFileMock).toHaveBeenCalledWith(ctx)
-    expect(copyWorkspaceFileMock).toHaveBeenCalledWith(ctx)
+    expect(listWorkspaceFilesMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(diffWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(readWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(readWorkspaceFileContentMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(writeWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(mkdirWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(deleteWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(renameWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+    expect(copyWorkspaceFileMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+  })
+
+  it('keeps fixed Profile session settings out of plain-user requests', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    for (const path of [
+      '/api/studio/sessions/:id/workspace',
+      '/api/studio/sessions/:id/model',
+      '/api/studio/sessions/:id/reasoning-effort',
+    ]) {
+      const layer = sessionRoutes.stack.find((entry: any) => entry.path === path)
+      const ctx: any = {
+        state: { user: { id: 7, username: 'member', role: 'user' } },
+        query: {},
+        request: { body: {} },
+        params: { id: 'session-1' },
+        status: 200,
+        body: null,
+      }
+
+      await dispatch(layer, ctx)
+
+      expect(ctx.status).toBe(403)
+      expect(ctx.body).toEqual({ error: 'Administrator privileges are required' })
+    }
+    expect(setWorkspaceMock).not.toHaveBeenCalled()
+    expect(setModelMock).not.toHaveBeenCalled()
+    expect(setReasoningEffortMock).not.toHaveBeenCalled()
+  })
+
+  it('allows administrators to update session-level runtime settings', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    const layer = sessionRoutes.stack.find((entry: any) => entry.path === '/api/studio/sessions/:id/model')
+    const ctx: any = {
+      state: { user: { id: 3, username: 'ops', role: 'admin' } },
+      query: {},
+      request: { body: { model: 'managed-model' } },
+      params: { id: 'session-1' },
+      status: 200,
+      body: null,
+    }
+
+    await dispatch(layer, ctx)
+
+    expect(ctx.body).toEqual({ ok: true })
+    expect(setModelMock).toHaveBeenCalledWith(ctx, expect.any(Function))
+  })
+
+  it('limits server workspace browsing and editing to super administrators', async () => {
+    const { sessionRoutes } = await import('../../packages/server/src/modules/studio/routes/sessions')
+    for (const path of [
+      '/api/studio/workspace/folders',
+      '/api/studio/sessions/:id/workspace-files/list',
+      '/api/studio/sessions/:id/workspace-file/write',
+    ]) {
+      const layer = sessionRoutes.stack.find((entry: any) => entry.path === path && entry.methods.includes('GET'))
+        || sessionRoutes.stack.find((entry: any) => entry.path === path)
+      const ctx: any = {
+        state: { user: { id: 3, username: 'ops', role: 'admin' } },
+        query: {},
+        request: { body: {} },
+        params: { id: 'session-1' },
+        status: 200,
+        body: null,
+      }
+
+      await dispatch(layer, ctx)
+
+      expect(ctx.status).toBe(403)
+      expect(ctx.body).toEqual({ error: 'Super administrator privileges are required' })
+    }
+    expect(listWorkspaceFoldersMock).not.toHaveBeenCalled()
+    expect(listWorkspaceFilesMock).not.toHaveBeenCalled()
+    expect(writeWorkspaceFileMock).not.toHaveBeenCalled()
   })
 
   it('delegates session search to the controller', async () => {

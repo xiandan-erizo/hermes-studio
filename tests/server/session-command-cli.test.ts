@@ -86,6 +86,31 @@ describe('CLI-style session commands', () => {
     expect(parseSessionCommand('/context')?.name).toBe('context')
   })
 
+  it('rejects nonessential session commands for plain users', async () => {
+    const state = { messages: [], isWorking: false, events: [], queue: [] }
+    const { namespaceEmit, nsp, runQueuedItem, sessionMap, socket, bridge } = makeContext(state)
+    const { handleSessionCommand, parseSessionCommand } = await import('../../packages/server/src/modules/studio/services/chat-run/session-command')
+
+    await handleSessionCommand('session-1', parseSessionCommand('/context')!, {
+      nsp: nsp as any,
+      socket: socket as any,
+      sessionMap,
+      bridge: bridge as any,
+      profile: 'default',
+      user: { id: 7, role: 'user' },
+      runQueuedItem,
+    })
+
+    expect(socket.emit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      command: 'context',
+      ok: false,
+      action: 'forbidden',
+    }))
+    expect(socket.join).not.toHaveBeenCalled()
+    expect(namespaceEmit).not.toHaveBeenCalled()
+    expect(calcAndUpdateUsageMock).not.toHaveBeenCalled()
+  })
+
   it('emits context usage for /context', async () => {
     const state = { messages: [], isWorking: false, events: [], queue: [] }
     const { namespaceEmit, nsp, runQueuedItem, sessionMap, socket, bridge } = makeContext(state)

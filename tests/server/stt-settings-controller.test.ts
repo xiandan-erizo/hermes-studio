@@ -424,11 +424,20 @@ describe('stt routes', () => {
     ]))
 
     const transcribeLayer: any = sttProtectedRoutes.stack.find((entry: any) => entry.path === '/api/studio/stt/transcribe')
-    const ctx: any = { request: { body: {} }, body: null }
+    const ctx: any = {
+      state: { user: { role: 'super_admin' }, profile: { name: 'default' } },
+      request: { body: {} },
+      body: null,
+    }
+    const dispatch = async (index: number): Promise<void> => {
+      const handler = transcribeLayer.stack[index]
+      if (!handler) return
+      await handler(ctx, () => dispatch(index + 1))
+    }
 
-    await transcribeLayer.stack[0](ctx, undefined)
+    await dispatch(0)
 
-    expect(transcribe).toHaveBeenCalledWith(ctx, undefined)
+    expect(transcribe).toHaveBeenCalledWith(ctx, expect.any(Function))
     expect(ctx.body).toEqual({ route: 'transcribe' })
   })
 })

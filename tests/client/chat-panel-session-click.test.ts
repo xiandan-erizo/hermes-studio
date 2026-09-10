@@ -111,14 +111,14 @@ describe('ChatPanel session clicks', () => {
 
     expect(source).toContain('newChatAgent.value === "pi"')
     expect(source).toContain('? "pi"')
-    expect(source).toContain('codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value')
+    expect(source).toContain('codingAgentId: selectedAgent === "hermes" ? undefined : selectedAgent')
   })
 
   it('shows and persists the API mode for Ekko chats and model switches', () => {
     const source = readFileSync('packages/client/src/components/hermes/chat/ChatPanel.vue', 'utf8')
 
     expect(source).toContain('apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined')
-    expect(source).toContain('v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === \'scoped\'"')
+    expect(source).toContain('v-if="!isPlainUser && isNewChatCodingAgent && effectiveNewChatAgentMode === \'scoped\'"')
     expect(source).toContain('if (isSessionModelScopedCodingAgent.value)')
     expect(source).toContain('await applySessionModelSwitch(pending.model, pending.provider, sessionModelApiMode.value)')
   })

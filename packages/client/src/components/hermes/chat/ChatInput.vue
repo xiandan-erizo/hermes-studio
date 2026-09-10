@@ -35,16 +35,19 @@ const props = withDefaults(defineProps<{
   modelDisabled?: boolean
   initialText?: string
   persistDraft?: boolean
+  plainUser?: boolean
 }>(), {
   modelLabel: '',
   modelDisabled: false,
   initialText: '',
   persistDraft: true,
+  plainUser: false,
 })
 
 const emit = defineEmits<{
   modelClick: []
   voiceClick: []
+  newChat: []
 }>()
 
 const reasoningEffortOptions = computed(() => [
@@ -145,6 +148,7 @@ type SlashCommandOption = {
   opensSkillPicker?: boolean
   opensBundlePicker?: boolean
   opensBundleCreator?: boolean
+  opensNewChat?: boolean
 }
 
 function insertVoiceTranscriptIntoInput(text: string) {
@@ -195,8 +199,15 @@ const voiceInput = useComposerVoiceInput({
 
 const CODING_AGENT_SLASH_COMMANDS = ['context', 'compact', 'usage', 'status']
 
-const bridgeCommands = computed<SlashCommandOption[]>(() =>
-  BRIDGE_SESSION_COMMAND_DEFINITIONS.map(command => ({
+const bridgeCommands = computed<SlashCommandOption[]>(() => {
+  if (props.plainUser) {
+    return [
+      { key: 'command:new', name: 'new', args: '', description: t('chat.newChat'), opensNewChat: true },
+      { key: 'command:compact', name: 'compact', args: '', description: t('chat.slashCommands.compact') },
+      { key: 'command:skills', name: 'skills', args: '', description: t('skills.title'), opensSkillPicker: true },
+    ]
+  }
+  return BRIDGE_SESSION_COMMAND_DEFINITIONS.map(command => ({
     key: command.key,
     name: command.name,
     args: command.argsKey ? t(command.argsKey) : command.args || '',
@@ -206,7 +217,7 @@ const bridgeCommands = computed<SlashCommandOption[]>(() =>
     opensBundlePicker: command.opensBundlePicker,
     opensBundleCreator: command.opensBundleCreator,
   }))
-)
+})
 
 const slashActive = ref(false)
 const slashQuery = ref('')
@@ -263,7 +274,11 @@ const skillPickerItems = computed(() => {
 })
 const filteredBridgeCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase()
-  const commands = isBridgeSession.value
+  const commands = props.plainUser
+    ? isBridgeSession.value
+      ? bridgeCommands.value
+      : bridgeCommands.value.filter(command => command.name === 'new' || command.name === 'compact')
+    : isBridgeSession.value
     ? bridgeCommands.value
     : isCodingAgentSession.value
       ? bridgeCommands.value.filter(command => CODING_AGENT_SLASH_COMMANDS.includes(command.name))
@@ -620,6 +635,13 @@ function updateSlashState() {
 }
 
 function selectBridgeCommand(command: SlashCommandOption) {
+  if (command.opensNewChat) {
+    inputText.value = ''
+    saveDraftForActiveSession('')
+    slashActive.value = false
+    emit('newChat')
+    return
+  }
   if (command.opensSkillPicker) {
     slashActive.value = false
     void openSkillPicker()
@@ -988,7 +1010,13 @@ async function handleSend() {
   }
   const text = inputText.value.trim()
   if (!text && attachments.value.length === 0) return
-  if (isBridgeSession.value && text === '/skill' && attachments.value.length === 0) {
+  if (props.plainUser && /^\/new$/i.test(text) && attachments.value.length === 0) {
+    inputText.value = ''
+    saveDraftForActiveSession('')
+    emit('newChat')
+    return
+  }
+  if (isBridgeSession.value && /^\/skills?$/i.test(text) && attachments.value.length === 0) {
     void openSkillPicker()
     return
   }

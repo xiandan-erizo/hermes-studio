@@ -443,6 +443,17 @@ function redactConfigSecretsForUserRole(ctx: any, value: unknown): void {
   }
 }
 
+function restrictConfigForPlainUser(ctx: any): void {
+  if (ctx.state?.user?.role !== 'user') return
+  const body = ctx.body && typeof ctx.body === 'object' && !Array.isArray(ctx.body)
+    ? ctx.body as Record<string, unknown>
+    : {}
+  const display = body.display && typeof body.display === 'object' && !Array.isArray(body.display)
+    ? body.display
+    : {}
+  ctx.body = { display }
+}
+
 export async function getConfig(ctx: any) {
   try {
     const profile = requestedProfile(ctx)
@@ -463,13 +474,11 @@ export async function getConfig(ctx: any) {
       const key = section as string
       if (key === 'gatewayAutoStart') {
         ctx.body = { gatewayAutoStart }
-        return
-      }
-      if (key === 'proxy') {
+      } else if (key === 'proxy') {
         ctx.body = { proxy }
-        return
+      } else {
+        ctx.body = { [key]: config[key] || {} }
       }
-      ctx.body = { [key]: config[key] || {} }
     } else if (sections) {
       const keys = (sections as string).split(',')
       const result: Record<string, any> = {}
@@ -486,6 +495,7 @@ export async function getConfig(ctx: any) {
       ctx.body = { ...config, gatewayAutoStart, proxy, platformCredentialStatus }
     }
     redactConfigSecretsForUserRole(ctx, ctx.body)
+    restrictConfigForPlainUser(ctx)
   } catch (err: any) {
     ctx.status = 500; ctx.body = { error: err.message }
   }

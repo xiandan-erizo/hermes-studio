@@ -53,6 +53,26 @@ function requestTargetSkillsDir(ctx: any): string {
   return target === 'hermes' ? requestSkillsDir(ctx) : globalSkillsDir(target)
 }
 
+function plainUserSkillList(categories: any[]) {
+  return {
+    categories: categories
+      .map(category => ({
+        name: category.name,
+        description: category.description || '',
+        skills: (category.skills || [])
+          .filter((skill: any) => skill.enabled !== false)
+          .map((skill: any) => ({
+            name: skill.name,
+            description: skill.description || '',
+            enabled: true,
+            source: skill.source,
+          })),
+      }))
+      .filter(category => category.skills.length > 0),
+    archived: [],
+  }
+}
+
 async function resolveSkillDirForTarget(ctx: any, category: string, skillName: string): Promise<string | null> {
   const target = requestSkillTarget(ctx)
   const skillsDir = requestTargetSkillsDir(ctx)
@@ -515,6 +535,18 @@ function mergeExternalCategories(categories: any[], externalCategories: any[]): 
 
 export async function list(ctx: any) {
   const target = requestSkillTarget(ctx)
+  if (ctx.state?.user?.role === 'user') {
+    if (!ctx.state?.profile?.name) {
+      ctx.status = 400
+      ctx.body = { error: 'Profile is required' }
+      return
+    }
+    if (target !== 'hermes') {
+      ctx.status = 403
+      ctx.body = { error: 'Only Hermes profile skills are available for this account' }
+      return
+    }
+  }
   const skillsDir = requestTargetSkillsDir(ctx)
   try {
     if (target !== 'hermes') {
@@ -585,11 +617,13 @@ export async function list(ctx: any) {
 
     const externalDirs = await resolveExternalSkillsDirs(config, skillsDir)
     const externalRaw = await describeRawExternalDirs(config)
-    ctx.body = {
-      categories,
-      archived,
-      paths: { local: skillsDir, external: externalDirs, externalRaw },
-    }
+    ctx.body = ctx.state?.user?.role === 'user'
+      ? plainUserSkillList(categories)
+      : {
+          categories,
+          archived,
+          paths: { local: skillsDir, external: externalDirs, externalRaw },
+        }
   } catch (err: any) {
     ctx.status = 500
     ctx.body = { error: `Failed to read skills directory: ${err.message}` }

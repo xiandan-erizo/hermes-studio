@@ -74,7 +74,7 @@ function chatRunBaseUrl(): string {
 }
 
 function profileFrom(ctx: Context, body: ChatRunPayload): string {
-  return String(body.profile || ctx.state.profile?.name || 'default').trim() || 'default'
+  return String(ctx.state.profile?.name || body.profile || 'default').trim() || 'default'
 }
 
 function userBody(body: ChatRunPayload): Record<string, unknown> {
@@ -96,6 +96,17 @@ export async function runOnce(ctx: Context) {
   if (body.input == null) {
     ctx.status = 400
     ctx.body = { ok: false, error: 'input is required' }
+    return
+  }
+
+  const authorizedProfile = String(ctx.state.profile?.name || '').trim()
+  const bodyProfile = typeof body.profile === 'string' ? body.profile.trim() : ''
+  if (authorizedProfile && bodyProfile && authorizedProfile !== bodyProfile) {
+    ctx.status = 403
+    ctx.body = {
+      ok: false,
+      error: `Body Profile "${bodyProfile}" conflicts with authorized Profile "${authorizedProfile}"`,
+    }
     return
   }
 

@@ -1,9 +1,10 @@
 import Router from '@koa/router'
 import * as ctrl from '../controllers/config'
+import { requireScopedProfile } from '../../studio/public/auth'
 
 export const configRoutes = new Router()
 
-configRoutes.get('/api/hermes/config', ctrl.getConfig)
+configRoutes.get('/api/hermes/config', requireScopedProfile, ctrl.getConfig)
 configRoutes.put('/api/hermes/config', ctrl.updateConfig)
 configRoutes.get('/api/hermes/config/auxiliary-models', ctrl.getAuxiliaryModels)
 configRoutes.put('/api/hermes/config/auxiliary-models', ctrl.updateAuxiliaryModels)

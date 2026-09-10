@@ -168,6 +168,25 @@ describe('user auth tables and middleware', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
+  it('rejects a plain user requesting an unassigned profile', async () => {
+    const { users, auth } = await initUsers()
+    const user = users.createUser({
+      username: 'member',
+      password: 'secret1',
+      role: 'user',
+      profiles: ['research'],
+      defaultProfile: 'research',
+    })!
+    const ctx = makeCtx({ id: user.id, username: user.username, role: user.role }, 'private')
+    const next = vi.fn(async () => {})
+
+    await auth.resolveUserProfile(ctx, next)
+
+    expect(ctx.status).toBe(403)
+    expect(ctx.body).toEqual({ error: 'Profile "private" is not available for this user' })
+    expect(next).not.toHaveBeenCalled()
+  })
+
   it('does not infer a profile when the frontend does not send one', async () => {
     const { auth } = await initUsers()
     const ctx = makeCtx({ id: 1, username: 'admin', role: 'super_admin' }, '')
@@ -323,10 +342,14 @@ describe('user auth tables and middleware', () => {
     expect(missingCtx.body).toEqual({ error: 'Administrator privileges are required' })
   })
 
-  it('ignores stale profile headers for the aggregate available-models endpoint', async () => {
+  it.each([
+    '/api/hermes/available-models',
+    '/api/agents/availability',
+    '/api/agents/status',
+  ])('ignores stale profile headers for profile-agnostic endpoint %s', async (path) => {
     const { auth } = await initUsers()
     const ctx = {
-      path: '/api/hermes/available-models',
+      path,
       state: { user: { id: 1, username: 'ops', role: 'admin' } },
       query: {},
       request: { body: {} },

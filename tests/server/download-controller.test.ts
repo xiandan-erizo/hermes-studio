@@ -66,6 +66,32 @@ describe('download controller path authorization', () => {
     expect(readFileMock).not.toHaveBeenCalled()
   })
 
+  it('rejects arbitrary Profile-relative files for a plain user', async () => {
+    const ctx = context('workspace/customer-data.csv')
+
+    await download(ctx)
+
+    expect(ctx.status).toBe(403)
+    expect(ctx.body).toEqual({
+      error: 'Profile files are available only to super administrators',
+      code: 'permission_denied',
+    })
+    expect(readFileMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects Profile-relative files for a regular administrator', async () => {
+    const ctx = context('workspace/customer-data.csv', 'admin')
+
+    await download(ctx)
+
+    expect(ctx.status).toBe(403)
+    expect(ctx.body).toEqual({
+      error: 'Profile files are available only to super administrators',
+      code: 'permission_denied',
+    })
+    expect(readFileMock).not.toHaveBeenCalled()
+  })
+
   it('allows an absolute attachment in the current Profile upload directory', async () => {
     const path = '/tmp/hermes-web-ui/upload/default/report.txt'
     isInProfileUploadDirMock.mockImplementation((candidate: string, profile: string) => (
@@ -78,5 +104,22 @@ describe('download controller path authorization', () => {
     expect(ctx.status).toBeUndefined()
     expect(readFileMock).toHaveBeenCalledWith(path)
     expect(ctx.body).toEqual(Buffer.from('attachment'))
+  })
+
+  it('requires an authorized request Profile for non-super-admin attachments', async () => {
+    const path = '/tmp/hermes-web-ui/upload/default/report.txt'
+    isInProfileUploadDirMock.mockReturnValue(true)
+    const ctx: any = {
+      query: { path },
+      state: { user: { id: 7, role: 'user' } },
+      set: vi.fn(),
+    }
+
+    await download(ctx)
+
+    expect(ctx.status).toBe(400)
+    expect(ctx.body).toEqual({ error: 'Profile is required', code: 'missing_profile' })
+    expect(isInProfileUploadDirMock).not.toHaveBeenCalled()
+    expect(readFileMock).not.toHaveBeenCalled()
   })
 })

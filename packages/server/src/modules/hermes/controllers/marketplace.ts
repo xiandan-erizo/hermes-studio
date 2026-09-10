@@ -37,10 +37,8 @@ import { logger } from '../../studio/public/logging'
 /**
  * Plugin marketplace ("插件中心") controllers.
  *
- * Browse + install live in the authenticated user zone: every logged-in user
- * may read the catalog and install into their active profile. Source CRUD and
- * refresh are mounted separately in the management zone (see
- * routes/marketplace.ts and bootstrap/routes.ts).
+ * Catalog/install and source administration are mounted as separate routers in
+ * the administrator zone (see routes/marketplace.ts and bootstrap/routes.ts).
  */
 
 function requestedProfile(ctx: any): string {

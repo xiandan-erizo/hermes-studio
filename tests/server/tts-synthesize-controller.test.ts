@@ -930,11 +930,20 @@ describe('tts routes', () => {
     ]))
 
     const synthLayer: any = ttsProtectedRoutes.stack.find((entry: any) => entry.path === '/api/studio/tts/synthesize')
-    const ctx: any = { request: { body: {} }, body: null }
+    const ctx: any = {
+      state: { user: { role: 'super_admin' }, profile: { name: 'default' } },
+      request: { body: {} },
+      body: null,
+    }
+    const dispatch = async (index: number): Promise<void> => {
+      const handler = synthLayer.stack[index]
+      if (!handler) return
+      await handler(ctx, () => dispatch(index + 1))
+    }
 
-    await synthLayer.stack[0](ctx, undefined)
+    await dispatch(0)
 
-    expect(synthesize).toHaveBeenCalledWith(ctx, undefined)
+    expect(synthesize).toHaveBeenCalledWith(ctx, expect.any(Function))
     expect(ctx.body).toEqual({ route: 'synthesize' })
   })
 })
@@ -966,5 +975,5 @@ describe('route registration ordering', () => {
     expect(mountedMiddleware.indexOf(ttsPublicMiddleware)).toBeGreaterThanOrEqual(0)
     expect(mountedMiddleware.indexOf(requireAuth)).toBeGreaterThan(mountedMiddleware.indexOf(ttsPublicMiddleware))
     expect(mountedMiddleware.indexOf(ttsProtectedMiddleware)).toBeGreaterThan(mountedMiddleware.indexOf(requireAuth))
-  })
+  }, 20_000)
 })

@@ -54,7 +54,7 @@ import { buildVisibleSessionCategoryGroups, partitionRecentSessions } from "./se
 import { buildSessionCategoryMenuChildren, resolveRecentSessionCategoryLabel } from "./session-category-menu";
 import PageSidebarNav from "@/components/layout/PageSidebarNav.vue";
 import PageSidebarFooter from "@/components/layout/PageSidebarFooter.vue";
-import { isStoredSuperAdmin } from "@/api/client";
+import { isStoredSuperAdmin, isStoredUser } from "@/api/client";
 import { useDefaultWorkspace } from "@/composables/useDefaultWorkspace";
 import { useCollapsedProviderGroups } from "@/composables/useCollapsedProviderGroups";
 import { canScopedCodingAgentUseProvider, usesServerManagedProviderAuth } from "@/utils/codingAgentProviders";
@@ -95,6 +95,7 @@ const router = useRouter();
 const message = useMessage();
 const { t } = useI18n();
 const isSuperAdmin = computed(() => isStoredSuperAdmin());
+const isPlainUser = computed(() => isStoredUser());
 const canSelectNewChatWorkspace = computed(() => isSuperAdmin.value);
 
 const showOutline = ref(false);
@@ -618,11 +619,20 @@ function sortSessionsForSidebar(items: Session[]): Session[] {
   });
 }
 
-const recentSessionPartition = computed(() => partitionRecentSessions(
-  chatStore.sessions.filter((session) => !sessionBrowserPrefsStore.isPinned(session.id)),
-  sessionBrowserPrefsStore.recentCount,
-  t("chat.recent"),
-));
+const recentSessionPartition = computed(() => {
+  const sessions = chatStore.sessions.filter((session) => !sessionBrowserPrefsStore.isPinned(session.id));
+  if (!sessionBrowserPrefsStore.showRecentSessions) {
+    return {
+      group: { key: "recent", label: t("chat.recent"), sessions: [] },
+      remaining: sessions,
+    };
+  }
+  return partitionRecentSessions(
+    sessions,
+    sessionBrowserPrefsStore.recentCount,
+    t("chat.recent"),
+  );
+});
 const recentSessions = computed(() => recentSessionPartition.value.group);
 const nonRecentSessions = computed(() => recentSessionPartition.value.remaining);
 const sessionCategoryNames = computed(() => new Map(
@@ -981,6 +991,7 @@ function getDefaultModelForProfile(profile: string) {
     ? groups.find((group) => group.provider === selectedProvider)
     : undefined;
   if (
+    !isPlainUser.value &&
     profile === activeProfileName &&
     selectedGroup?.models.includes(selectedModel)
   ) {
@@ -1007,7 +1018,9 @@ function getDefaultModelForProfile(profile: string) {
 }
 
 const newChatProfileOptions = computed(() =>
-  (profilesStore.profiles.length > 0 ? profilesStore.profiles : [{ name: "default" }]).map((profile) => ({
+  (profilesStore.profiles.length > 0
+    ? profilesStore.profiles
+    : isPlainUser.value ? [] : [{ name: "default" }]).map((profile) => ({
     label: profile.name,
     value: profile.name,
   })),
@@ -1073,6 +1086,7 @@ const newChatNeedsApiKey = computed(() =>
 const canConfirmNewChat = computed(() => {
   if (newChatCategoryCreating.value) return false;
   if (!newChatProfile.value) return false;
+  if (isPlainUser.value) return true;
   if (!newChatUsesProviderModel.value) return true;
   if (!newChatProvider.value || !newChatModel.value) return false;
   if (!isNewChatCodingAgent.value) return true;
@@ -1163,17 +1177,24 @@ async function openNewChatModal() {
   showNewChatModal.value = true;
   newChatLoading.value = true;
   newChatCategoryId.value = null;
+  if (isPlainUser.value) {
+    newChatAgent.value = "hermes";
+    newChatAgentMode.value = "scoped";
+  }
   try {
     await loadSessionCategories();
     if (profilesStore.profiles.length === 0) await profilesStore.fetchProfiles();
     if (appStore.modelGroups.length === 0 && appStore.profileModelGroups.length === 0) {
       await appStore.loadModels();
     }
+    const storedProfile = profilesStore.profiles.find(
+      (profile) => profile.name === profilesStore.activeProfileName,
+    )?.name;
     newChatProfile.value =
-      profilesStore.activeProfileName ||
+      storedProfile ||
       profilesStore.profiles.find((profile) => profile.active)?.name ||
       profilesStore.profiles[0]?.name ||
-      "default";
+      (isPlainUser.value ? "" : "default");
     
     if (canSelectNewChatWorkspace.value) {
       // Initialize workspace composable and load defaults
@@ -1250,35 +1271,43 @@ async function confirmNewChat() {
     }
   }
 
-  const group = selectedNewChatProviderGroup.value;
-  const source = newChatAgent.value === "hermes" ? "cli" : "coding_agent";
+  const plainUserDefaults = isPlainUser.value
+    ? getDefaultModelForProfile(newChatProfile.value)
+    : null;
+  const selectedAgent = isPlainUser.value ? "hermes" : newChatAgent.value;
+  const group = isPlainUser.value
+    ? getSelectableModelGroupsForProfile(newChatProfile.value).find(
+        (item) => item.provider === plainUserDefaults?.provider,
+      )
+    : selectedNewChatProviderGroup.value;
+  const source = selectedAgent === "hermes" ? "cli" : "coding_agent";
   const codingAgentMode = effectiveNewChatAgentMode.value;
   const isGlobalCodingAgent = source === "coding_agent" && codingAgentMode === "global";
-  const agent = newChatAgent.value === "codex"
+  const agent = selectedAgent === "codex"
     ? "codex"
-    : newChatAgent.value === "claude-code"
+    : selectedAgent === "claude-code"
       ? "claude"
-      : newChatAgent.value === "pi"
+      : selectedAgent === "pi"
         ? "pi"
-      : newChatAgent.value === "ekko-agent"
+      : selectedAgent === "ekko-agent"
         ? "ekko-agent"
       : "hermes";
   const session = chatStore.newChat({
     profile: newChatProfile.value,
-    provider: isGlobalCodingAgent ? undefined : newChatProvider.value,
-    model: isGlobalCodingAgent ? undefined : newChatModel.value,
+    provider: isGlobalCodingAgent ? undefined : plainUserDefaults?.provider || newChatProvider.value,
+    model: isGlobalCodingAgent ? undefined : plainUserDefaults?.model || newChatModel.value,
     source,
     agent,
-    codingAgentId: newChatAgent.value === "hermes" ? undefined : newChatAgent.value,
+    codingAgentId: selectedAgent === "hermes" ? undefined : selectedAgent,
     codingAgentMode: source === "coding_agent" ? codingAgentMode : undefined,
-    workspace: newChatWorkspace.value || null,
-    categoryId: newChatCategoryId.value,
+    workspace: isPlainUser.value ? null : newChatWorkspace.value || null,
+    categoryId: isPlainUser.value ? null : newChatCategoryId.value,
     baseUrl: source === "coding_agent" && !isGlobalCodingAgent ? group?.base_url || newChatBaseUrl.value.trim() || undefined : undefined,
     apiKey: source === "coding_agent" && !isGlobalCodingAgent ? group?.api_key || newChatApiKey.value.trim() || undefined : undefined,
     apiMode: isNewChatCodingAgent.value && !isGlobalCodingAgent ? newChatApiMode.value : undefined,
   });
   // Record workspace to recent list
-  if (newChatWorkspace.value && workspaceComposable) {
+  if (!isPlainUser.value && newChatWorkspace.value && workspaceComposable) {
     workspaceComposable.recordWorkspaceUsage(newChatWorkspace.value);
     recentWorkspaces.value = workspaceComposable.loadRecentWorkspaces();
   }
@@ -2570,7 +2599,7 @@ async function handleSessionModelCustomSubmit() {
     >
       <NDrawerContent :title="t('chat.newChat')" closable>
         <div class="new-chat-form">
-          <label class="new-chat-field">
+          <label v-if="!isPlainUser" class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.agent") }}</span>
             <NSelect
               v-model:value="newChatAgent"
@@ -2578,7 +2607,7 @@ async function handleSessionModelCustomSubmit() {
               :disabled="newChatLoading"
             />
           </label>
-          <label v-if="isNewChatExternalCodingAgent" class="new-chat-field">
+          <label v-if="!isPlainUser && isNewChatExternalCodingAgent" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.launchModeScope") }}</span>
             <NRadioGroup v-model:value="newChatAgentMode" name="new-chat-coding-agent-mode">
               <NRadioButton
@@ -2596,10 +2625,11 @@ async function handleSessionModelCustomSubmit() {
               :value="newChatProfile"
               :options="newChatProfileOptions"
               :loading="newChatLoading || profilesStore.loading"
+              :disabled="isPlainUser && newChatProfileOptions.length === 0"
               @update:value="handleNewChatProfileChange"
             />
           </label>
-          <label class="new-chat-field">
+          <label v-if="!isPlainUser" class="new-chat-field">
             <span class="new-chat-label">{{ t("chat.category") }}</span>
             <NSelect
               :value="newChatCategoryId ?? 0"
@@ -2613,7 +2643,7 @@ async function handleSessionModelCustomSubmit() {
             />
             <span class="new-chat-field-hint">{{ t("chat.categoryCreateHint") }}</span>
           </label>
-          <label v-if="newChatUsesProviderModel && newChatCanUseMoa" class="new-chat-field">
+          <label v-if="!isPlainUser && newChatUsesProviderModel && newChatCanUseMoa" class="new-chat-field">
             <span class="new-chat-label">{{ t('chat.modelType') }}</span>
             <NRadioGroup
               :value="newChatModelKind"
@@ -2624,7 +2654,7 @@ async function handleSessionModelCustomSubmit() {
               <NRadioButton value="moa">{{ t('chat.moaPresets') }}</NRadioButton>
             </NRadioGroup>
           </label>
-          <label v-if="newChatUsesProviderModel && newChatModelKind === 'model'" class="new-chat-field">
+          <label v-if="!isPlainUser && newChatUsesProviderModel && newChatModelKind === 'model'" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.provider") }}</span>
             <NSelect
               :value="newChatProvider"
@@ -2633,7 +2663,7 @@ async function handleSessionModelCustomSubmit() {
               @update:value="handleNewChatProviderChange"
             />
           </label>
-          <label v-if="newChatUsesProviderModel" class="new-chat-field">
+          <label v-if="!isPlainUser && newChatUsesProviderModel" class="new-chat-field">
             <span class="new-chat-label">
               {{ newChatModelKind === 'moa' ? t('chat.moaPresets') : t('models.models') }}
             </span>
@@ -2644,7 +2674,7 @@ async function handleSessionModelCustomSubmit() {
               filterable
             />
           </label>
-          <label v-if="isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
+          <label v-if="!isPlainUser && isNewChatCodingAgent && effectiveNewChatAgentMode === 'scoped'" class="new-chat-field">
             <span class="new-chat-label">{{ t("codingAgents.protocolScope") }}</span>
             <NSelect
               v-model:value="newChatApiMode"
@@ -2652,14 +2682,14 @@ async function handleSessionModelCustomSubmit() {
               :disabled="newChatLoading"
             />
           </label>
-          <label v-if="newChatNeedsBaseUrl" class="new-chat-field">
+          <label v-if="!isPlainUser && newChatNeedsBaseUrl" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.baseUrl") }}</span>
             <NInput
               v-model:value="newChatBaseUrl"
               :placeholder="t('models.baseUrlPlaceholder')"
             />
           </label>
-          <label v-if="newChatNeedsApiKey" class="new-chat-field">
+          <label v-if="!isPlainUser && newChatNeedsApiKey" class="new-chat-field">
             <span class="new-chat-label">{{ t("models.apiKey") }}</span>
             <NInput
               v-model:value="newChatApiKey"
@@ -2812,7 +2842,7 @@ async function handleSessionModelCustomSubmit() {
           </NButton>
           <span class="header-session-title" dir="auto">{{ headerTitle }}</span>
           <button
-            v-if="chatStore.activeSession?.workspace"
+            v-if="isSuperAdmin && chatStore.activeSession?.workspace"
             class="workspace-badge"
             type="button"
             :title="chatStore.activeSession.workspace"
@@ -2939,8 +2969,10 @@ async function handleSessionModelCustomSubmit() {
               :model-disabled="activeSessionUsesGlobalCodingAgentConfig"
               :initial-text="initialComposerText"
               :persist-draft="composerPersistDraft"
+              :plain-user="isPlainUser"
               @model-click="handleHeaderModelClick"
               @voice-click="openRealtimeVoice"
+              @new-chat="openNewChatModal"
             />
           </div>
           <OutlinePanel
@@ -2956,7 +2988,7 @@ async function handleSessionModelCustomSubmit() {
             @leave-cancelled="handleToolPanelLeaveCancelled"
           >
             <aside
-              v-if="showToolPanel"
+              v-if="showToolPanel && isSuperAdmin"
               class="chat-tool-panel"
               :style="toolPanelStyle"
             >

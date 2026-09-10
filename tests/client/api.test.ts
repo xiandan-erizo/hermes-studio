@@ -97,6 +97,16 @@ describe('API Client', () => {
       expect(options.headers['X-Hermes-Profile']).toBeUndefined()
     })
 
+    it('does not scope global agent availability to a cached profile', async () => {
+      localStorage.setItem('hermes_active_profile_name', 'stale-profile')
+      mockFetch.mockResolvedValue({ ok: true, status: 200, json: () => ({ agents: [] }) })
+
+      await request('/api/agents/availability')
+
+      const [, options] = mockFetch.mock.calls[0]
+      expect(options.headers['X-Hermes-Profile']).toBeUndefined()
+    })
+
     it('does not add Authorization header when no token', async () => {
       mockFetch.mockResolvedValue({ ok: true, status: 200, json: () => ({ data: 1 }) })
 

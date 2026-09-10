@@ -275,6 +275,7 @@ const router = createRouter({
       path: '/hermes/files',
       name: 'hermes.files',
       component: () => import('@/views/hermes/FilesView.vue'),
+      meta: { requiresSuperAdmin: true },
     },
     {
       path: '/hermes/coding-agents',

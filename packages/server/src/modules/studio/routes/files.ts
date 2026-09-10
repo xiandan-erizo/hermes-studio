@@ -5,9 +5,9 @@ import * as previewCtrl from '../controllers/file-preview'
 
 export const fileRoutes = new Router()
 
-fileRoutes.get('/api/studio/files/preview', previewCtrl.previewProfileFile)
-fileRoutes.get('/api/studio/files/list', ctrl.list)
-fileRoutes.get('/api/studio/files/stat', ctrl.stat)
+fileRoutes.get('/api/studio/files/preview', requireSuperAdmin, previewCtrl.previewProfileFile)
+fileRoutes.get('/api/studio/files/list', requireSuperAdmin, ctrl.list)
+fileRoutes.get('/api/studio/files/stat', requireSuperAdmin, ctrl.stat)
 fileRoutes.get('/api/studio/files/read', requireSuperAdmin, ctrl.read)
 fileRoutes.put('/api/studio/files/write', requireSuperAdmin, ctrl.write)
 fileRoutes.delete('/api/studio/files/delete', requireSuperAdmin, ctrl.remove)

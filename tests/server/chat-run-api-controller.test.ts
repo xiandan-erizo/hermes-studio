@@ -35,6 +35,34 @@ describe('chat-run HTTP API controller', () => {
     vi.clearAllMocks()
   })
 
+  it('rejects a body Profile that conflicts with the authorized request Profile', async () => {
+    const socket = makeSocket()
+    ioMock.mockReturnValue(socket)
+    const { runOnce } = await import('../../packages/server/src/modules/studio/controllers/chat-run')
+    const ctx = {
+      get: vi.fn(() => ''),
+      state: {
+        user: { id: 7, username: 'member', role: 'user' },
+        profile: { name: 'research' },
+      },
+      request: { body: { input: 'run elsewhere', profile: 'private' } },
+      status: 200,
+      body: undefined as any,
+    }
+
+    const pending = runOnce(ctx as any)
+    await new Promise(resolve => setImmediate(resolve))
+    socket.emitNative('connect')
+    await pending
+
+    expect(ctx.status).toBe(403)
+    expect(ctx.body).toEqual({
+      ok: false,
+      error: 'Body Profile "private" conflicts with authorized Profile "research"',
+    })
+    expect(ioMock).not.toHaveBeenCalled()
+  })
+
   it('rejects a coding-agent run without an explicit execution identity and explains the correct request', async () => {
     const socket = makeSocket()
     ioMock.mockReturnValue(socket)

@@ -11,6 +11,11 @@ const userCanAccessProfileMock = vi.hoisted(() => vi.fn((_user: unknown, _profil
 const getSessionMock = vi.hoisted(() => vi.fn((sessionId?: string) => sessionId
   ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
   : undefined))
+const sessionCommandMocks = vi.hoisted(() => ({
+  handle: vi.fn(),
+  parse: vi.fn(() => null as any),
+  is: vi.fn(() => false),
+}))
 const bridgeMock = vi.hoisted(() => ({
   status: vi.fn(),
   statusIfLoaded: vi.fn(),
@@ -35,9 +40,9 @@ vi.mock('../../packages/server/src/modules/studio/services/chat-run/handle-codin
 }))
 
 vi.mock('../../packages/server/src/modules/studio/services/chat-run/session-command', () => ({
-  handleSessionCommand: vi.fn(),
-  isSessionCommand: vi.fn(() => false),
-  parseSessionCommand: vi.fn(() => null),
+  handleSessionCommand: sessionCommandMocks.handle,
+  isSessionCommand: sessionCommandMocks.is,
+  parseSessionCommand: sessionCommandMocks.parse,
 }))
 
 vi.mock('../../packages/server/src/modules/hermes/services/bridge/index', () => ({
@@ -301,6 +306,11 @@ describe('ensureBridgeReadyForChatRun', () => {
     getSessionMock.mockImplementation((sessionId?: string) => sessionId
       ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
       : undefined)
+    sessionCommandMocks.handle.mockReset()
+    sessionCommandMocks.parse.mockReset()
+    sessionCommandMocks.parse.mockReturnValue(null)
+    sessionCommandMocks.is.mockReset()
+    sessionCommandMocks.is.mockReturnValue(false)
     ensureReadyMock.mockResolvedValue({
       reachable: true,
       status: 'ready',
@@ -400,6 +410,15 @@ describe('ChatRunSocket bridge readiness gating', () => {
     resumeBridgeRunMock.mockReset()
     handleCodingAgentRunMock.mockReset()
     loadSessionStateFromDbMock.mockReset()
+    getSessionMock.mockReset()
+    getSessionMock.mockImplementation((sessionId?: string) => sessionId
+      ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
+      : undefined)
+    sessionCommandMocks.handle.mockReset()
+    sessionCommandMocks.parse.mockReset()
+    sessionCommandMocks.parse.mockReturnValue(null)
+    sessionCommandMocks.is.mockReset()
+    sessionCommandMocks.is.mockReturnValue(false)
     ensureReadyMock.mockResolvedValue({
       reachable: true,
       status: 'ready',
@@ -459,6 +478,189 @@ describe('ChatRunSocket bridge readiness gating', () => {
     expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
       session_id: 'session-1',
       error: 'Session belongs to profile "research", not "default"',
+    }))
+  })
+
+  it('canonicalizes a plain user new session to the Profile-owned Hermes runtime', async () => {
+    getSessionMock.mockReturnValue(undefined)
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user' }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({
+      input: 'hello',
+      session_id: 'new-user-session',
+      profile: 'default',
+      source: 'coding_agent',
+      session_source: 'global_agent',
+      model: 'attacker-model',
+      provider: 'attacker-provider',
+      workspace: '/tmp/attacker-workspace',
+      category_id: 42,
+      coding_agent_id: 'codex',
+      mode: 'global',
+      baseUrl: 'https://attacker.invalid',
+      apiKey: 'attacker-key',
+    })
+
+    expect(handleCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
+    expect(handleBridgeRunMock.mock.calls[0][2]).toEqual(expect.objectContaining({
+      session_id: 'new-user-session',
+      profile: 'default',
+      source: 'cli',
+      model: undefined,
+      provider: undefined,
+      workspace: null,
+      category_id: null,
+      coding_agent_id: undefined,
+      mode: undefined,
+      baseUrl: undefined,
+      apiKey: undefined,
+    }))
+  })
+
+  it('keeps later plain user turns bound to the persisted Hermes runtime', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'persisted-user-session',
+      profile: 'default',
+      source: 'cli',
+      agent: 'hermes',
+      model: 'profile-model',
+      provider: 'profile-provider',
+      workspace: '/tmp/profile-workspace',
+      category_id: null,
+      owner_user_id: 7,
+      ownership_state: 'owned',
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user' }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({
+      input: 'second turn',
+      session_id: 'persisted-user-session',
+      profile: 'default',
+      source: 'coding_agent',
+      model: 'attacker-model',
+      provider: 'attacker-provider',
+      workspace: '/tmp/attacker-workspace',
+      coding_agent_id: 'codex',
+      mode: 'global',
+      apiKey: 'attacker-key',
+    })
+
+    expect(handleCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(handleBridgeRunMock).toHaveBeenCalledTimes(1)
+    expect(handleBridgeRunMock.mock.calls[0][2]).toEqual(expect.objectContaining({
+      source: 'cli',
+      model: 'profile-model',
+      provider: 'profile-provider',
+      workspace: '/tmp/profile-workspace',
+      coding_agent_id: undefined,
+      mode: undefined,
+      apiKey: undefined,
+    }))
+  })
+
+  it('keeps historical plain user coding sessions on their persisted coding runtime', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'persisted-coding-session',
+      profile: 'default',
+      source: 'coding_agent',
+      agent: 'codex',
+      agent_mode: 'scoped',
+      model: 'profile-model',
+      provider: 'profile-provider',
+      api_mode: 'codex_responses',
+      workspace: '/tmp/profile-workspace',
+      category_id: null,
+      owner_user_id: 7,
+      ownership_state: 'owned',
+    })
+    handleCodingAgentRunMock.mockResolvedValueOnce({ runId: 'coding-run-1', messageId: 42 })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user' }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({
+      input: 'continue old coding chat',
+      session_id: 'persisted-coding-session',
+      profile: 'default',
+      source: 'cli',
+      model: 'attacker-model',
+      provider: 'attacker-provider',
+      workspace: '/tmp/attacker-workspace',
+      coding_agent_id: 'pi',
+      mode: 'global',
+      apiKey: 'attacker-key',
+    })
+
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect(handleCodingAgentRunMock).toHaveBeenCalledWith(
+      expect.anything(),
+      socket,
+      expect.objectContaining({
+        source: 'coding_agent',
+        coding_agent_id: 'codex',
+        mode: 'scoped',
+        model: 'profile-model',
+        provider: 'profile-provider',
+        apiMode: 'codex_responses',
+        workspace: '/tmp/profile-workspace',
+        apiKey: undefined,
+      }),
+      'default',
+      expect.any(Map),
+    )
+  })
+
+  it('rejects commands against a session owned by another user before joining it', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'other-session', profile: 'default', source: 'cli', owner_user_id: 99, ownership_state: 'owned',
+    })
+    sessionCommandMocks.parse.mockReturnValue({ name: 'context', rawName: 'context', args: '' })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user' }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    socket.join.mockClear()
+    await handlers.get('run')?.({ input: '/context', session_id: 'other-session', source: 'cli' })
+
+    expect(sessionCommandMocks.handle).not.toHaveBeenCalled()
+    expect(socket.join).not.toHaveBeenCalledWith('session:other-session')
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
+      session_id: 'other-session',
+      error: 'Session is not available for this user',
+    }))
+  })
+
+  it('rejects nonessential commands for plain users before coding-agent dispatch', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'coding-session', profile: 'default', source: 'coding_agent', owner_user_id: 7, ownership_state: 'owned',
+    })
+    sessionCommandMocks.parse.mockReturnValue({ name: 'context', rawName: 'context', args: '' })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user' }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({ input: '/context', session_id: 'coding-session', source: 'coding_agent' })
+
+    expect(handleCodingAgentRunMock).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('session.command', expect.objectContaining({
+      command: 'context',
+      ok: false,
+      action: 'forbidden',
     }))
   })
 

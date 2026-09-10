@@ -138,10 +138,12 @@ function shouldAttachProfileHeader(path: string, options: RequestInit): boolean 
     if (url.searchParams.has('profile')) return false
     if (url.pathname.startsWith('/api/hermes/profiles')) return false
     if (url.pathname.startsWith('/api/theme')) return false
+    if (url.pathname === '/api/agents/availability' || url.pathname === '/api/agents/status') return false
     if (isProfileWideSessionCollection(url.pathname)) return false
   } catch {
     if (path.startsWith('/api/hermes/profiles')) return false
     if (path.startsWith('/api/theme')) return false
+    if (path === '/api/agents/availability' || path === '/api/agents/status') return false
     if (isProfileWideSessionCollection(path.split('?')[0] || path)) return false
   }
   return !bodyHasProfileSelector(options.body)

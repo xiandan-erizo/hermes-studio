@@ -71,6 +71,7 @@ interface MockHermesApiOptions {
     models: string[]
     [key: string]: unknown
   }>
+  profiles?: Array<{ name: string; active: boolean; model: string; gateway: string; alias: string }>
   theme?: Partial<MockThemePayload>
   socialMessagePlatforms?: unknown[]
   socialMessageResult?: Record<string, unknown>
@@ -711,7 +712,7 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
 
     if (pathname === '/api/hermes/profiles') {
       await route.fulfill(jsonResponse({
-        profiles: [
+        profiles: options.profiles ?? [
           { name: 'default', active: activeProfileName === 'default', model: 'test-model', gateway: 'test', alias: 'Default' },
           { name: 'research', active: activeProfileName === 'research', model: 'test-model', gateway: 'test', alias: 'Research' },
         ],

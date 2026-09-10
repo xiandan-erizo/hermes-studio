@@ -64,7 +64,7 @@ describe('file routes path metadata', () => {
       { name: 'app.log', path: 'logs/app.log', isDir: false, size: 12, modTime: '2026-05-20T00:00:00.000Z' },
     ])
 
-    const ctx: any = { query: { path: 'logs' }, state: { profile: { name: 'research' } }, body: null }
+    const ctx: any = { query: { path: 'logs' }, state: superAdminState(), body: null }
 
     await runFileRoute('/api/studio/files/list', ctx)
 
@@ -96,7 +96,7 @@ describe('file routes path metadata', () => {
       modTime: '2026-05-20T00:00:00.000Z',
     })
 
-    const ctx: any = { query: { path: 'logs/app.log' }, state: { profile: { name: 'research' } }, body: null }
+    const ctx: any = { query: { path: 'logs/app.log' }, state: superAdminState(), body: null }
 
     await runFileRoute('/api/studio/files/stat', ctx)
 
@@ -125,7 +125,7 @@ describe('file routes path metadata', () => {
     const headers: Record<string, string> = {}
     const ctx: any = {
       query: { path: 'workspace/report.pdf' },
-      state: { profile: { name: 'research' } },
+      state: superAdminState(),
       set: (name: string, value: string) => { headers[name] = value },
       body: null,
     }
@@ -277,5 +277,29 @@ describe('file routes path metadata', () => {
     expect(writeCtx.status).toBe(403)
     expect(writeCtx.body).toEqual({ error: 'Super administrator privileges are required' })
     expect(provider.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('requires a super administrator for Profile file listing, metadata, and previews', async () => {
+    provider.listDir.mockResolvedValue([])
+    provider.stat.mockResolvedValue({ name: 'report.pdf', path: 'report.pdf', isDir: false, size: 4 })
+    provider.readFile.mockResolvedValue(Buffer.from('data'))
+
+    for (const path of ['/api/studio/files/list', '/api/studio/files/stat', '/api/studio/files/preview']) {
+      const ctx: any = {
+        query: { path: 'report.pdf' },
+        state: {
+          profile: { name: 'research' },
+          user: { id: 2, username: 'admin', role: 'admin' },
+        },
+        set: vi.fn(),
+        status: 200,
+        body: null,
+      }
+
+      await runFileRoute(path, ctx)
+
+      expect(ctx.status, path).toBe(403)
+      expect(ctx.body).toEqual({ error: 'Super administrator privileges are required' })
+    }
   })
 })

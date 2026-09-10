@@ -38,5 +38,5 @@ authProtectedRoutes.get('/api/auth/external-identities/users', requireAdmin, ext
 authProtectedRoutes.get('/api/auth/invites', requireAdmin, inviteCtrl.listInviteRecords)
 authProtectedRoutes.post('/api/auth/invites', requireAdmin, inviteCtrl.createInviteRecord)
 authProtectedRoutes.delete('/api/auth/invites/:code', requireAdmin, inviteCtrl.revokeInviteRecord)
-authProtectedRoutes.get('/api/auth/locked-ips', ctrl.listLockedIps)
-authProtectedRoutes.delete('/api/auth/locked-ips', ctrl.unlockIpHandler)
+authProtectedRoutes.get('/api/auth/locked-ips', requireSuperAdmin, ctrl.listLockedIps)
+authProtectedRoutes.delete('/api/auth/locked-ips', requireSuperAdmin, ctrl.unlockIpHandler)

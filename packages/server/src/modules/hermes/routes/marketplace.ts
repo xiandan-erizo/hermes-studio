@@ -2,10 +2,9 @@ import Router from '@koa/router'
 import * as ctrl from '../controllers/marketplace'
 
 /**
- * Plugin marketplace routes, split by zone:
- *  - marketplaceRoutes       — user zone (browse + install into own profile)
- *  - marketplaceAdminRoutes  — management zone (source CRUD + refresh)
- * Both are mounted in bootstrap/routes.ts.
+ * Plugin marketplace routes are split between catalog/install operations and
+ * source administration. Both routers live in the administrator zone; source
+ * changes remain a separate surface for clearer ownership.
  */
 
 export const marketplaceRoutes = new Router()

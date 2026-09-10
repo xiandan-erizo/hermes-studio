@@ -6,6 +6,8 @@ export {
   issueModelRunJwt,
   issueUserJwt,
   requireAdmin,
+  requirePathProfileAccess,
+  requireScopedProfile,
   requireSuperAdmin,
   requireUserProfile,
   requireElevatedApi,

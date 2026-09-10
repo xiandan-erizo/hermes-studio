@@ -383,6 +383,8 @@ const USER_READABLE_API_PATHS: Array<{ method: string; path: string }> = [
   { method: 'GET', path: '/api/hermes/profiles' },
   { method: 'GET', path: '/api/hermes/available-models' },
   { method: 'GET', path: '/api/hermes/config' },
+  { method: 'GET', path: '/api/hermes/skills' },
+  { method: 'GET', path: '/api/agents/availability' },
 ]
 
 function isUserReadablePath(ctx: Context): boolean {
@@ -415,6 +417,9 @@ export async function requireElevatedApi(ctx: Context, next: Next): Promise<void
 }
 
 export function resolveRequestedProfile(ctx: Context): string {
+  if (ctx.path === '/api/agents/availability' || ctx.path === '/api/agents/status') {
+    return ''
+  }
   if (ctx.path === '/api/hermes/available-models' && typeof ctx.query.profile !== 'string') {
     return ''
   }
@@ -454,6 +459,43 @@ export async function requireUserProfile(ctx: Context, next: Next): Promise<void
     ctx.body = { error: 'Profile is required' }
     return
   }
+  await next()
+}
+
+export async function requireScopedProfile(ctx: Context, next: Next): Promise<void> {
+  if (ctx.state.serverTokenAuth || ctx.state.user?.role === 'super_admin') {
+    await next()
+    return
+  }
+  if (!ctx.state.profile?.name) {
+    ctx.status = 400
+    ctx.body = { error: 'Profile is required' }
+    return
+  }
+  await next()
+}
+
+export async function requirePathProfileAccess(ctx: Context, next: Next): Promise<void> {
+  const profileName = String((ctx.params as { profile?: unknown } | undefined)?.profile || '').trim()
+  if (!profileName) {
+    ctx.status = 400
+    ctx.body = { error: 'Profile is required' }
+    return
+  }
+
+  const user = ctx.state.user
+  if (!ctx.state.serverTokenAuth && user?.role !== 'super_admin') {
+    const allowed = Array.isArray(user?.profiles)
+      ? user.profiles.includes(profileName)
+      : !!user && userCanAccessProfile(user.id, profileName)
+    if (!allowed) {
+      ctx.status = 403
+      ctx.body = { error: `Profile "${profileName}" is not available for this user` }
+      return
+    }
+  }
+
+  ctx.state.profile = { name: profileName }
   await next()
 }
 

@@ -128,6 +128,21 @@ export async function handleSessionCommand(
   command: ParsedSessionCommand,
   ctx: SessionCommandContext,
 ): Promise<boolean | void> {
+  if (
+    ctx.user?.role === 'user'
+    && command.rawName !== 'compact'
+    && command.rawName !== 'skill'
+  ) {
+    ctx.socket.emit('session.command', {
+      event: 'session.command',
+      session_id: sessionId,
+      command: command.rawName,
+      ok: false,
+      action: 'forbidden',
+      message: 'This command is not available for this account.',
+    })
+    return
+  }
   const state = getOrCreateSession(ctx.sessionMap, sessionId)
   ctx.socket.join(`session:${sessionId}`)
   ensureCommandSession(sessionId, command, ctx)

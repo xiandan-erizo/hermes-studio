@@ -74,6 +74,49 @@ afterEach(async () => {
 })
 
 describe('config controller locked file updates', () => {
+  it('returns only display settings to a plain chat user', async () => {
+    await writeFile(join(hermesHome, 'config.yaml'), [
+      'display:',
+      '  show_reasoning: true',
+      '  bell_on_complete: true',
+      'memory:',
+      '  memory_enabled: true',
+      'platforms:',
+      '  feishu:',
+      '    extra:',
+      '      app_id: hidden-app',
+      '',
+    ].join('\n'), 'utf-8')
+    const { getConfig } = await loadController()
+    const ctx = makeCtx({}, 'default')
+    ctx.state.user = { id: 7, username: 'member', role: 'user' }
+
+    await getConfig(ctx)
+
+    expect(ctx.body).toEqual({
+      display: {
+        show_reasoning: true,
+        bell_on_complete: true,
+      },
+    })
+  })
+
+  it.each(['gatewayAutoStart', 'proxy'])(
+    'keeps filtered %s config out of plain-user responses',
+    async (section) => {
+      await writeFile(join(hermesHome, 'config.yaml'), 'display:\n  show_reasoning: true\n', 'utf-8')
+      await writeFile(join(hermesHome, '.env'), 'HTTPS_PROXY=http://user:secret@proxy.example\n', 'utf-8')
+      const { getConfig } = await loadController()
+      const ctx = makeCtx({}, 'default')
+      ctx.query = { section }
+      ctx.state.user = { id: 7, username: 'member', role: 'user' }
+
+      await getConfig(ctx)
+
+      expect(ctx.body).toEqual({ display: {} })
+    },
+  )
+
   it('deep merges a config section and restarts the gateway through hermes-cli', async () => {
     await writeFile(join(hermesHome, 'config.yaml'), [
       'telegram:',

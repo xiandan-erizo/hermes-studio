@@ -65,12 +65,9 @@ async function applyRouteProfile() {
 onMounted(async () => {
   chatStore.setRuntimeMode('default')
   appStore.loadModels()
-  // 先加载 profile，确保缓存 key 使用正确的 profile name；同时预取显示设置，
-  // 让聊天完成提示音不依赖用户先打开 Settings 页面。
-  await Promise.all([
-    profilesStore.fetchProfiles(),
-    settingsStore.fetchSettings(),
-  ])
+  // Profile authorization determines which display settings this account may read.
+  await profilesStore.fetchProfiles()
+  await settingsStore.fetchSettings()
   chatStore.validateSessionProfileFilter(profilesStore.profiles.map(profile => profile.name))
   await applyRouteProfile()
   await loadRouteSession()

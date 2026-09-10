@@ -189,14 +189,27 @@ describe('requireElevatedApi role gate', () => {
 
   it('lets the user role read chat-facing endpoints but not write them', async () => {
     const { requireElevatedApi } = await loadMiddleware()
-    for (const path of ['/api/hermes/profiles', '/api/hermes/available-models', '/api/hermes/config']) {
+    for (const path of [
+      '/api/hermes/profiles',
+      '/api/hermes/available-models',
+      '/api/hermes/config',
+      '/api/hermes/skills',
+      '/api/agents/availability',
+    ]) {
       const read = ctx(path, 'user', 'GET')
       await requireElevatedApi(read, read.next)
       expect(read.status).toBe(200)
-      const write = ctx('/api/hermes/config', 'user', 'PUT')
+    }
+
+    for (const path of ['/api/hermes/config', '/api/hermes/skills/toggle']) {
+      const write = ctx(path, 'user', 'PUT')
       await requireElevatedApi(write, write.next)
       expect(write.status).toBe(403)
     }
+
+    const detailedStatus = ctx('/api/agents/status', 'user', 'GET')
+    await requireElevatedApi(detailedStatus, detailedStatus.next)
+    expect(detailedStatus.status).toBe(403)
   })
 
   it('allows admin and super_admin on /api paths', async () => {

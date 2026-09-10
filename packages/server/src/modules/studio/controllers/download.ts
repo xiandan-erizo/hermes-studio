@@ -79,8 +79,14 @@ export async function download(ctx: any) {
   }
 
   try {
-    const profile = requestedProfile(ctx)
     const superAdmin = ctx.state?.user?.role === 'super_admin'
+    const scopedProfile = ctx.state?.profile?.name
+    if (!superAdmin && !scopedProfile) {
+      ctx.status = 400
+      ctx.body = { error: 'Profile is required', code: 'missing_profile' }
+      return
+    }
+    const profile = scopedProfile || requestedProfile(ctx)
     if (!superAdmin && isSensitivePath(filePath)) {
       ctx.status = 403
       ctx.body = { error: 'Sensitive files cannot be downloaded', code: 'permission_denied' }
@@ -88,6 +94,11 @@ export async function download(ctx: any) {
     }
 
     const absolutePath = isAbsolute(filePath)
+    if (!superAdmin && !absolutePath) {
+      ctx.status = 403
+      ctx.body = { error: 'Profile files are available only to super administrators', code: 'permission_denied' }
+      return
+    }
     const validPath = absolutePath ? validatePath(filePath) : resolveProfileFilePath(filePath, profile)
     // Chat uploads are stored as absolute paths under a Profile-specific upload
     // directory. Preserve those links without reopening arbitrary host reads.
