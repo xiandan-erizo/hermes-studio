@@ -1,5 +1,6 @@
 import type { Context } from 'koa'
 import { bridgeMcpAction } from '../services/mcp/bridge-actions'
+import { normalizeMcpAppSandboxOrigin } from '../../studio/public/mcp-apps'
 
 function getProfile(ctx: Context): string | undefined {
   return (ctx.state as any)?.profile?.name || undefined
@@ -127,7 +128,10 @@ export async function resolveApp(ctx: Context) {
     return
   }
   try {
-    ctx.body = await bridgeMcpAction('mcp_app_resolve', { toolName }, getProfile(ctx))
+    const result = await bridgeMcpAction('mcp_app_resolve', { toolName }, getProfile(ctx))
+    const configuredOrigin = process.env.HERMES_MCP_APP_SANDBOX_ORIGIN?.trim()
+    const sandboxOrigin = configuredOrigin ? normalizeMcpAppSandboxOrigin(configuredOrigin) : undefined
+    ctx.body = { ...result, ...(sandboxOrigin ? { sandboxOrigin } : {}) }
   } catch (err: any) {
     const code = String(err?.response?.code || '')
     ctx.status = code === 'mcp_app_not_found' ? 404 : 503

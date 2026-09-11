@@ -34,7 +34,7 @@ describe('MCP App tool results', () => {
     })
   })
 
-  it('does not create an App row for failed, running, non-MCP, or unstructured tools', () => {
+  it('does not create an App row for failed, running, or non-MCP tools', () => {
     const base: Message = {
       id: 'tool-1',
       role: 'tool',
@@ -60,10 +60,31 @@ describe('MCP App tool results', () => {
       { ...base, toolStatus: 'running' as const },
       { ...base, toolStatus: 'error' as const },
       { ...base, toolName: 'terminal' },
-      { ...base, toolResult: { result: 'plain text' } },
       { ...base, toolResult: { isError: true, structuredContent } },
     ]) {
       expect(includeMcpAppResults([message])).toEqual([message])
+    }
+  })
+
+  it('resolves UI candidates with text-only MCP results without requiring structuredContent', () => {
+    for (const toolResult of [
+      { content: [{ type: 'text', text: 'Ticket draft ready' }] },
+      { result: 'Ticket draft ready' },
+    ]) {
+      const rows = includeMcpAppResults([{
+        id: 'text-app', role: 'tool', content: '', timestamp: 1,
+        toolName: 'mcp__ticket__render_ticket_card', toolStatus: 'done', toolResult,
+      }])
+      expect(rows).toHaveLength(2)
+      expect(rows[1].mcpApp?.toolResult.content).toEqual([{ type: 'text', text: 'Ticket draft ready' }])
+    }
+  })
+
+  it('preserves metadata and JSON-looking text in Hermes content-only results', () => {
+    for (const result of ['Ticket ready', '{"ticketId":"T-7"}']) {
+      expect(normalizeMcpCallToolResult({ result, _meta: { viewState: { id: 7 } } })).toEqual({
+        content: [{ type: 'text', text: result }], _meta: { viewState: { id: 7 } },
+      })
     }
   })
 

@@ -306,6 +306,8 @@ describe('ensureBridgeReadyForChatRun', () => {
     getSessionMock.mockImplementation((sessionId?: string) => sessionId
       ? { id: sessionId, profile: 'default', source: 'cli', model: 'gpt-test', provider: 'openai' }
       : undefined)
+    userCanAccessProfileMock.mockReset()
+    userCanAccessProfileMock.mockReturnValue(true)
     sessionCommandMocks.handle.mockReset()
     sessionCommandMocks.parse.mockReset()
     sessionCommandMocks.parse.mockReturnValue(null)
@@ -462,7 +464,7 @@ describe('ChatRunSocket bridge readiness gating', () => {
   })
 
   it('rejects an explicit Profile that differs from an existing Session Profile', async () => {
-    getSessionMock.mockReturnValueOnce({
+    getSessionMock.mockReturnValue({
       id: 'session-1', profile: 'research', source: 'cli', owner_user_id: 7,
     })
     const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
@@ -478,6 +480,25 @@ describe('ChatRunSocket bridge readiness gating', () => {
     expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
       session_id: 'session-1',
       error: 'Session belongs to profile "research", not "default"',
+    }))
+  })
+
+  it('rejects a run for another Profile on the same authenticated socket', async () => {
+    getSessionMock.mockReturnValue({
+      id: 'research-session', profile: 'research', source: 'cli', owner_user_id: 7, ownership_state: 'owned',
+    })
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = { id: 7, username: 'member', role: 'user', profiles: ['default', 'research'] }
+    const server = new ChatRunSocket(io as any)
+
+    ;(server as any).onConnection(socket)
+    await handlers.get('run')?.({ input: 'hello', session_id: 'research-session', source: 'cli' })
+
+    expect(handleBridgeRunMock).not.toHaveBeenCalled()
+    expect(socket.emit).toHaveBeenCalledWith('run.failed', expect.objectContaining({
+      session_id: 'research-session',
+      error: 'Profile "research" is not available on this connection',
     }))
   })
 

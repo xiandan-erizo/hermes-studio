@@ -219,7 +219,7 @@ defineExpose({
           :run-id="msg.toolRunId"
           :tools="msg.toolMessages"
         />
-        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" />
+        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" :profile="activeSession?.profile" />
         <MessageItem
           v-else
           :message="msg"

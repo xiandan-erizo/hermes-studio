@@ -17,11 +17,22 @@ const mediaControllers = vi.hoisted(() => ({
 const chatRunControllers = vi.hoisted(() => ({
   runOnce: vi.fn((ctx: any) => { ctx.body = { ok: true } }),
 }))
+const mcpControllers = vi.hoisted(() => ({
+  listServers: vi.fn(),
+  addServer: vi.fn(),
+  updateServer: vi.fn(),
+  removeServer: vi.fn(),
+  testServer: vi.fn(),
+  listTools: vi.fn(),
+  reloadMcp: vi.fn(),
+  resolveApp: vi.fn((ctx: any) => { ctx.body = { ok: true } }),
+}))
 
 vi.mock('../../packages/server/src/modules/studio/controllers/upload', () => uploadControllers)
 vi.mock('../../packages/server/src/modules/studio/controllers/app-upload', () => appUploadControllers)
 vi.mock('../../packages/server/src/modules/studio/controllers/media', () => mediaControllers)
 vi.mock('../../packages/server/src/modules/studio/controllers/chat-run', () => chatRunControllers)
+vi.mock('../../packages/server/src/modules/hermes/controllers/mcp', () => mcpControllers)
 
 async function dispatch(layer: any, ctx: any): Promise<void> {
   const invoke = async (index: number): Promise<void> => {
@@ -69,6 +80,25 @@ describe('Profile-scoped chat routes', () => {
     expect(appUploadControllers.open).not.toHaveBeenCalled()
     expect(mediaControllers.apiKeyImageGenerate).not.toHaveBeenCalled()
     expect(chatRunControllers.runOnce).not.toHaveBeenCalled()
+  })
+
+  it('rejects MCP App resolution without a validated Profile', async () => {
+    const { mcpAppRoutes } = await import('../../packages/server/src/modules/hermes/routes/mcp')
+    const layer = mcpAppRoutes.stack.find((entry: any) => entry.path === '/api/hermes/mcp/apps/resolve')
+    const ctx: any = {
+      state: { user: { id: 7, username: 'member', role: 'user' } },
+      query: {},
+      request: { body: { toolName: 'mcp__ticket__render' } },
+      params: {},
+      status: 200,
+      body: null,
+    }
+
+    await dispatch(layer, ctx)
+
+    expect(ctx.status).toBe(400)
+    expect(ctx.body).toEqual({ error: 'Profile is required' })
+    expect(mcpControllers.resolveApp).not.toHaveBeenCalled()
   })
 
   it('allows the same chat operations with an authorized Profile', async () => {

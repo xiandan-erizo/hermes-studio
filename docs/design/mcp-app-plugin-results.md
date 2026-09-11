@@ -60,21 +60,24 @@ requesting profile's bridge worker and configured or enabled portable servers.
 
 ## Studio Host Contract
 
-Completed MCP tool messages with `structuredContent` produce a presentation row
+Completed MCP tool messages with a standard result or a Hermes text result produce a presentation row
 that remains visible when technical tool traces are hidden. The row asks the
 authenticated, profile-scoped server endpoint to resolve the tool's declared
 resource.
 
 Live delivery, reconnect replay, and history snapshots preserve complete MCP
-results containing `structuredContent` up to 256 KiB of UTF-8 JSON, including
+result envelopes up to 256 KiB of UTF-8 JSON, including
 their text fallback and `_meta`. Ordinary tool previews retain the 1000-character
 limit. Larger MCP results fall back to a text preview so a partially truncated
 view model is never rendered as a complete App. Persisted results remain intact.
 
-The host reconnects when moving a chat row recreates its iframe window. Each
-connection receives a plain JSON descriptor and the saved tool input/result.
-It connects from the initial `about:blank` frame before assigning the real HTML
-once; a placeholder `srcdoc` can race that navigation in isolated Chrome frames.
+The host connects to a different-origin sandbox proxy before navigating its
+outer iframe. After `sandbox-proxy-ready` it sends the declared resource; the
+proxy applies resource CSP in HTTP headers and a restricted inner document.
+Input and result follow the View's initialized notification. Moving a chat row
+may recreate its iframe window, in which case the host reconnects. Initialized
+resources receive a teardown request before replacement; controlled replacement
+waits up to 800 ms, and Vue/page unmount sends teardown on a best-effort basis.
 If initialization does not finish within 12 seconds, the host displays the text
 fallback and a retry control instead of leaving an empty frame. Retrying reloads
 the declared resource; it does not invoke the tool or repeat business actions.
@@ -84,12 +87,28 @@ Studio uses `@modelcontextprotocol/ext-apps` `AppBridge` and
 standard `CallToolResult`. The first version advertises only:
 
 - external HTTP/HTTPS links through a host-validated `ui/open-link` handler;
-- inline display, theme, locale, timezone, and bounded resize context.
+- inline/fullscreen display, theme variables, locale, timezone, and measured resize context.
 
 It does not advertise app-initiated tool calls, messages, model-context updates,
 sampling, downloads, camera, microphone, geolocation, or clipboard access.
-The iframe has `sandbox="allow-scripts"` without `allow-same-origin`; resource
-CSP metadata is narrowed into a document CSP.
+The different-origin proxy has `sandbox="allow-scripts allow-same-origin"`; the
+inner View has only `allow-scripts`. The proxy validates message source windows
+and parent origin and forwards protocol IDs unchanged. Display mode switches use
+the native dialog top layer and retain the existing iframe document.
+
+### Sandbox deployment
+
+Set `HERMES_MCP_APP_SANDBOX_ORIGIN` to a dedicated HTTP(S) origin, for example
+`https://views.example.com`. HTTPS hosts require an HTTPS sandbox. Route only
+`/api/studio/mcp-apps/sandbox` on that origin to Studio's backend; do not expose
+the Studio UI or authenticated API routes on the sandbox hostname. The endpoint
+serves a public bootstrap with no credentials or business data; the host sends
+the declared HTML after the proxy is ready. The parent and resource-domain
+parameters are validated, and the CSP response restricts the frame ancestors.
+
+Local loopback development defaults to the alternative `localhost`/`127.0.0.1`
+hostname on the browser-facing port. Hosted deployments without an isolated
+origin use the existing text/error fallback; they never load a same-origin proxy.
 
 ## Marketplace Contract
 

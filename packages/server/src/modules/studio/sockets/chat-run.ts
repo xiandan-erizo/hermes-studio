@@ -432,14 +432,26 @@ export class ChatRunSocket {
         return
       }
       const storedSession = data.session_id ? getSession(data.session_id) : null
-      if (storedSession && socketUser && !canOperateSession(socketUser, storedSession)) {
-        socket.emit('run.failed', {
-          event: 'run.failed',
-          session_id: data.session_id,
-          queue_id: data.queue_id,
-          error: 'Session is not available for this user',
-        })
-        return
+      if (storedSession) {
+        const sessionProfile = String(storedSession.profile || 'default').trim() || 'default'
+        if (sessionProfile !== currentProfile()) {
+          socket.emit('run.failed', {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: `Profile "${sessionProfile}" is not available on this connection`,
+          })
+          return
+        }
+        if (socketUser && !canOperateSession(socketUser, storedSession)) {
+          socket.emit('run.failed', {
+            event: 'run.failed',
+            session_id: data.session_id,
+            queue_id: data.queue_id,
+            error: 'Session is not available for this user',
+          })
+          return
+        }
       }
       if (socketUser?.role === 'user') {
         data.baseUrl = undefined

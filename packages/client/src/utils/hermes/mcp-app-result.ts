@@ -41,6 +41,7 @@ function standardContent(value: unknown): CallToolResult['content'] | null {
 
 export function normalizeMcpCallToolResult(value: unknown): CallToolResult | null {
   const queue: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }]
+  let textFallback: CallToolResult | null = null
   for (let index = 0; index < queue.length && index < 32; index += 1) {
     const item = queue[index]
     if (item.depth > MAX_WRAPPER_DEPTH) continue
@@ -66,11 +67,19 @@ export function normalizeMcpCallToolResult(value: unknown): CallToolResult | nul
     if (failed) {
       return cloneJson({ content, isError: true }) as CallToolResult | null
     }
+    if (typeof current.result === 'string' && !textFallback) {
+      // A tool's text can itself be JSON. Prefer recognized nested envelopes,
+      // but retain the original text and metadata if traversal finds none.
+      textFallback = cloneJson({
+        content: textContent(current.result),
+        ...(record(current._meta) ? { _meta: current._meta as Record<string, unknown> } : {}),
+      }) as CallToolResult | null
+    }
     for (const key of WRAPPER_KEYS) {
       if (current[key] !== undefined) queue.push({ value: current[key], depth: item.depth + 1 })
     }
   }
-  return null
+  return textFallback
 }
 
 function normalizeToolArgs(value: unknown): Record<string, unknown> {
@@ -85,7 +94,7 @@ function mcpAppInvocation(message: Message): McpAppInvocation | null {
     || !message.toolName?.startsWith('mcp__')
   ) return null
   const toolResult = normalizeMcpCallToolResult(message.toolResult ?? message.content)
-  if (!toolResult || toolResult.isError || !record(toolResult.structuredContent)) return null
+  if (!toolResult || toolResult.isError) return null
   return {
     toolName: message.toolName,
     ...(message.toolCallId ? { toolCallId: message.toolCallId } : {}),

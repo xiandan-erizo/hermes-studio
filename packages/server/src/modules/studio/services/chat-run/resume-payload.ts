@@ -136,7 +136,7 @@ function looksLikeUnifiedDiff(content: string): boolean {
   return hasFileHeader && (hasTargetHeader || hasHunk)
 }
 
-function hasStructuredMcpResult(content: string): boolean {
+function hasMcpResult(content: string): boolean {
   const queue: Array<{ value: unknown; depth: number }> = [{ value: content, depth: 0 }]
   for (let index = 0; index < queue.length && index < 32; index += 1) {
     let { value, depth } = queue[index]
@@ -149,6 +149,10 @@ function hasStructuredMcpResult(content: string): boolean {
     if (result.structuredContent && typeof result.structuredContent === 'object' && !Array.isArray(result.structuredContent)) {
       return true
     }
+    if (Array.isArray(result.content) && result.content.every(block =>
+      block && typeof block === 'object' && typeof block.type === 'string',
+    )) return true
+    if (typeof result.result === 'string') return true
     for (const key of ['output', 'result', 'data']) {
       if (result[key] !== undefined) queue.push({ value: result[key], depth: depth + 1 })
     }
@@ -157,11 +161,10 @@ function hasStructuredMcpResult(content: string): boolean {
 }
 
 function truncateToolResult(content: string, toolName?: string): string {
-  if (content.length <= RESUME_TOOL_RESULT_DISPLAY_LIMIT || looksLikeUnifiedDiff(content)) return content
-
   const isMcp = toolName?.startsWith('mcp__') === true
   const oversizedMcp = isMcp && Buffer.byteLength(content, 'utf8') > MCP_STRUCTURED_RESULT_MAX_BYTES
-  if (isMcp && !oversizedMcp && hasStructuredMcpResult(content)) return content
+  if (content.length <= RESUME_TOOL_RESULT_DISPLAY_LIMIT || (!oversizedMcp && looksLikeUnifiedDiff(content))) return content
+  if (isMcp && !oversizedMcp && hasMcpResult(content)) return content
 
   // Oversized MCP results fall back to plain text. Returning a partially cut
   // structuredContent object could otherwise render an incomplete App as valid.

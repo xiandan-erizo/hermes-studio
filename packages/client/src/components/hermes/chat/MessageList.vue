@@ -670,7 +670,7 @@ defineExpose({
           :run-id="msg.toolRunId"
           :tools="msg.toolMessages"
         />
-        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" />
+        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" :profile="chatStore.activeSession?.profile" />
         <div v-else-if="msg.systemType === 'fork-divider' && forkLineage" class="fork-divider" role="separator">
           <div class="fork-divider-line" aria-hidden="true"></div>
           <div class="fork-divider-pill">

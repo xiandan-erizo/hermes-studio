@@ -285,6 +285,17 @@ describe('MCP Controller', () => {
   })
 
   describe('resolveApp', () => {
+    it('does not expose credentials from an invalid sandbox origin setting', async () => {
+      vi.stubEnv('HERMES_MCP_APP_SANDBOX_ORIGIN', 'https://user:private-password@views.example.test')
+      try {
+        mcpAppResolveMock.mockResolvedValue({ ok: true })
+        const { resolveApp } = await import('../../packages/server/src/modules/hermes/controllers/mcp')
+        const ctx = createCtx({ request: { body: { toolName: 'mcp__ticket__render_ticket_card' } } })
+        await resolveApp(ctx)
+        expect(ctx.status).toBe(503)
+        expect(JSON.stringify(ctx.body)).not.toContain('private-password')
+      } finally { vi.unstubAllEnvs() }
+    })
     it('resolves a descriptor-bound app in the authenticated profile', async () => {
       const resolved = {
         ok: true,

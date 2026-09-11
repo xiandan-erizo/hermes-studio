@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
+import { mkdir, readFile, rm, stat, symlink, truncate, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -138,6 +138,19 @@ Body text here.
       })
     })
 
+    it('lists and reads a portable MCP App plugin without a Skill directory', async () => {
+      const repo = await writePortableFixtureRepo()
+      await rm(join(repo, 'plugins', 'demo-tool', 'skills'), { recursive: true, force: true })
+      const { readPluginDetail, scanMarketplaceRepo } = await import('../../packages/server/src/modules/hermes/services/marketplace/repo-scanner')
+
+      await expect(scanMarketplaceRepo(repo)).resolves.toMatchObject([
+        { name: 'demo-tool', portable: true, skills: [] },
+      ])
+      await expect(readPluginDetail(repo, 'demo-tool')).resolves.toMatchObject({
+        name: 'demo-tool', portable: true, skills: [],
+      })
+    })
+
     it('loads plugin detail with SKILL.md bodies and file lists', async () => {
       const repo = await writeFixtureRepo()
       const { readPluginDetail } = await import('../../packages/server/src/modules/hermes/services/marketplace/repo-scanner')
@@ -236,6 +249,40 @@ Body text here.
       ).rejects.toThrow(/installed from source "a"/)
     })
 
+    it('keeps the installed skill and its lock when an update copy fails', async () => {
+      const repo = await writeFixtureRepo()
+      const skillsDir = join(workDir, 'rollback-profile', 'skills')
+      const { installMarketplaceSkill, listMarketplaceInstalled, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      await installMarketplaceSkill({ source, repoDir: repo, skillsDir, plugin: 'demo-tool', skill: 'demo-tool', version: '1.2.3' })
+      const oversized = join(repo, 'plugins', 'demo-tool', 'skills', 'demo-tool', 'oversized.bin')
+      await writeFile(oversized, '')
+      await truncate(oversized, 101 * 1024 * 1024)
+
+      await expect(
+        installMarketplaceSkill({ source, repoDir: repo, skillsDir, plugin: 'demo-tool', skill: 'demo-tool', version: '1.3.0' }),
+      ).rejects.toThrow(MarketplaceInstallError)
+
+      expect(await readFile(join(skillsDir, 'demo-tool', 'scripts', 'run.py'), 'utf-8')).toContain('print("hi")')
+      await expect(listMarketplaceInstalled(skillsDir)).resolves.toMatchObject([
+        { skill: 'demo-tool', version: '1.2.3' },
+      ])
+    })
+
+    it('rejects a cyclic internal symlink without following it', async () => {
+      const repo = await writeFixtureRepo()
+      const skillsDir = join(workDir, 'symlink-profile', 'skills')
+      const { installMarketplaceSkill, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+      await symlink('.', join(repo, 'plugins', 'demo-tool', 'skills', 'demo-tool', 'loop'))
+
+      await expect(
+        installMarketplaceSkill({ source, repoDir: repo, skillsDir, plugin: 'demo-tool', skill: 'demo-tool' }),
+      ).rejects.toThrow(MarketplaceInstallError)
+      await expect(stat(join(skillsDir, 'demo-tool'))).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+
     it('installs, updates, and uninstalls a complete portable plugin while preserving plugin data', async () => {
       const repo = await writePortableFixtureRepo()
       const profileDir = join(workDir, 'portable-profile')
@@ -304,6 +351,28 @@ Body text here.
       ])
     })
 
+    it('does not replace another plugin\'s legacy skill when names collide', async () => {
+      const repo = await writePortableFixtureRepo()
+      const legacyDir = join(repo, 'plugins', 'legacy-tools')
+      await mkdir(join(legacyDir, '.codex-plugin'), { recursive: true })
+      await mkdir(join(legacyDir, 'skills', 'demo-tool'), { recursive: true })
+      await writeFile(join(legacyDir, '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'legacy-tools', version: '1.0.0' }), 'utf-8')
+      await writeFile(join(legacyDir, 'skills', 'demo-tool', 'SKILL.md'), '---\nname: demo-tool\ndescription: Legacy collision fixture.\n---\n', 'utf-8')
+      const profileDir = join(workDir, 'collision-profile')
+      const skillsDir = join(profileDir, 'skills')
+      await mkdir(profileDir, { recursive: true })
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const { installMarketplacePlugin, installMarketplaceSkill, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      await installMarketplaceSkill({ source, repoDir: repo, skillsDir, plugin: 'legacy-tools', skill: 'demo-tool' })
+      await expect(installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool' }))
+        .rejects.toThrow(MarketplaceInstallError)
+
+      await expect(stat(join(skillsDir, 'demo-tool'))).resolves.toMatchObject({ isDirectory: expect.any(Function) })
+      await expect(stat(join(profileDir, 'plugins', 'demo-tool'))).rejects.toMatchObject({ code: 'ENOENT' })
+    })
+
     it('refuses to overwrite an unmanaged portable plugin directory', async () => {
       const repo = await writePortableFixtureRepo()
       const profileDir = join(workDir, 'conflict-profile')
@@ -316,6 +385,25 @@ Body text here.
       await expect(installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool' }))
         .rejects.toThrow(MarketplaceInstallError)
       expect(await readFile(join(profileDir, 'plugins', 'demo-tool', 'plugin.json'), 'utf-8')).toContain('mine')
+    })
+
+    it('refuses a portable uninstall with a polluted plugin path in its lock', async () => {
+      const profileDir = join(workDir, 'polluted-lock-profile')
+      const skillsDir = join(profileDir, 'skills')
+      const outsidePlugin = join(workDir, 'outside-plugin')
+      await mkdir(skillsDir, { recursive: true })
+      await mkdir(outsidePlugin, { recursive: true })
+      await writeFile(join(outsidePlugin, 'marker.txt'), 'keep\n', 'utf-8')
+      await writeFile(join(skillsDir, '.webui-marketplace-lock.json'), JSON.stringify({
+        demo: {
+          sourceId: 7, sourceName: 'src', url: 'git@host:repo.git', plugin: '../../outside-plugin', skill: 'demo',
+          version: '1.0.0', contentHash: '', installedAt: '', updatedAt: '', installKind: 'plugin',
+        },
+      }), 'utf-8')
+      const { uninstallMarketplaceSkill, MarketplaceInstallError } = await loadInstall()
+
+      await expect(uninstallMarketplaceSkill(skillsDir, 'demo')).rejects.toThrow(MarketplaceInstallError)
+      expect(await readFile(join(outsidePlugin, 'marker.txt'), 'utf-8')).toBe('keep\n')
     })
   })
 

@@ -1,5 +1,6 @@
 import type { Context, Middleware } from 'koa'
 import type { IncomingMessage } from 'http'
+import { sandboxOrigin } from '../services/mcp-apps/sandbox'
 
 interface CorsPolicy {
   allowAll: boolean
@@ -149,6 +150,18 @@ function isGroupChatAgentLinkDocument(ctx: Context): boolean {
 
 export function securityHeaders(): Middleware {
   return async (ctx, next) => {
+    const appFrameOrigins = ["'self'"]
+    try {
+      const configured = process.env.HERMES_MCP_APP_SANDBOX_ORIGIN?.trim()
+      if (configured) appFrameOrigins.push(sandboxOrigin(configured))
+      else {
+        const url = new URL(ctx.origin)
+        if (['localhost', '127.0.0.1'].includes(url.hostname)) {
+          url.hostname = url.hostname === 'localhost' ? '127.0.0.1' : 'localhost'
+          appFrameOrigins.push(url.origin)
+        }
+      }
+    } catch { /* Invalid configuration never broadens frame permissions. */ }
     ctx.set('X-Content-Type-Options', 'nosniff')
     ctx.set('X-Frame-Options', 'DENY')
     ctx.set('Referrer-Policy', 'no-referrer')
@@ -160,6 +173,7 @@ export function securityHeaders(): Middleware {
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
+      `frame-src ${appFrameOrigins.join(' ')}`,
       "frame-ancestors 'none'",
       "script-src 'self' 'unsafe-inline'",
       "style-src 'self' 'unsafe-inline'",

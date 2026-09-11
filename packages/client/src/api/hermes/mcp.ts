@@ -38,11 +38,14 @@ export interface McpToolsResponse {
 
 export interface McpAppResolveResponse {
   ok: boolean
+  sandboxOrigin?: string
+  app?: { id: string; name: string; version?: string }
   code?: string
   error?: string
   tool?: {
     name: string
     raw_name: string
+    title?: string
     server: string
     description: string
     input_schema: Record<string, unknown>
@@ -58,11 +61,11 @@ export interface McpAppResolveResponse {
   }
 }
 
-export async function resolveMcpApp(toolName: string): Promise<McpAppResolveResponse> {
+export async function resolveMcpApp(toolName: string, profile?: string): Promise<McpAppResolveResponse> {
   return request<McpAppResolveResponse>('/api/hermes/mcp/apps/resolve', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ toolName }),
+    body: JSON.stringify({ toolName, ...(profile ? { profile } : {}) }),
   })
 }
 

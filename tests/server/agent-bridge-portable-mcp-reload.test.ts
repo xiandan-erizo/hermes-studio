@@ -26,7 +26,7 @@ spec = importlib.util.spec_from_file_location("hermes_bridge_portable_reload", p
 bridge = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = bridge
 spec.loader.exec_module(bridge)
-bridge._profile_env = lambda _profile: nullcontext()
+bridge._server._profile_env = lambda _profile: nullcontext()
 
 events = []
 
@@ -71,6 +71,88 @@ print(json.dumps({"response": response, "events": events, "registered": register
       stopped: 1,
       servers: ['new-portable'],
       tools: ['mcp__new-portable__render'],
+    })
+  })
+
+  it('interpolates portable MCP configs and registers them within the selected Profile environment', () => {
+    const result = runPython(String.raw`
+import importlib.util
+import json
+import os
+import sys
+import threading
+import types
+from contextlib import contextmanager
+from pathlib import Path
+
+path = Path("packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py")
+spec = importlib.util.spec_from_file_location("hermes_bridge_portable_profile", path)
+bridge = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = bridge
+spec.loader.exec_module(bridge)
+
+active_profiles = []
+@contextmanager
+def profile_env(profile):
+    active_profiles.append(profile)
+    previous = os.environ.get("PLUGIN_TOKEN")
+    os.environ["PLUGIN_TOKEN"] = "research-token"
+    try:
+        yield
+    finally:
+        active_profiles.pop()
+        if previous is None:
+            os.environ.pop("PLUGIN_TOKEN", None)
+        else:
+            os.environ["PLUGIN_TOKEN"] = previous
+bridge._server._profile_env = profile_env
+
+class Manager:
+    configs = {"ticket-view": {"command": "node", "env": {"TOKEN": "${'${'}PLUGIN_TOKEN}"}}}
+    def get_portable_mcp_servers(self):
+        return dict(self.configs)
+manager = Manager()
+
+plugins = types.ModuleType("hermes_cli.plugins")
+plugins.discover_plugins = lambda force=False: None
+plugins.get_plugin_manager = lambda: manager
+sys.modules["hermes_cli.plugins"] = plugins
+
+tools_package = types.ModuleType("tools")
+tools_package.__path__ = []
+mcp_module = types.ModuleType("tools.mcp_tool")
+mcp_module.discover_mcp_tools = lambda: []
+mcp_module.mcp_prefixed_tool_name = lambda server_name, tool_name: f"mcp__{server_name}__{tool_name}"
+mcp_module._run_on_mcp_loop = lambda *_args, **_kwargs: None
+mcp_module._servers = {}
+mcp_module._lock = threading.RLock()
+mcp_module._interpolate_env_vars = lambda value: {
+    **value,
+    "env": {**value.get("env", {}), "TOKEN": os.environ["PLUGIN_TOKEN"]},
+}
+events = []
+def register(configs):
+    events.append({
+        "active_profiles": list(active_profiles),
+        "token": configs["ticket-view"]["env"]["TOKEN"],
+    })
+    return ["mcp__ticket-view__render"]
+mcp_module.register_mcp_servers = register
+sys.modules["tools"] = tools_package
+sys.modules["tools.mcp_tool"] = mcp_module
+
+server = bridge.BridgeServer("tcp://127.0.0.1:0")
+response = server._handle_mcp_action("mcp_portable_reload", {}, "research")
+print(json.dumps({"response": response, "events": events}))
+`)
+
+    expect(result.events).toEqual([
+      { active_profiles: ['research'], token: 'research-token' },
+    ])
+    expect(result.response).toMatchObject({
+      ok: true,
+      servers: ['ticket-view'],
+      tools: ['mcp__ticket-view__render'],
     })
   })
 

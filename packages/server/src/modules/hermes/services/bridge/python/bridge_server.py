@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 import socket
@@ -10,6 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from bridge_mcp_apps import install_mcp_apps_adapter, resolve_mcp_app_identity
 from bridge_pool import AgentPool
 from bridge_runtime import (
     _agent_root,
@@ -384,16 +387,16 @@ class BridgeServer:
     def _handle_mcp_action(self, action: str, req: dict[str, Any], profile: str | None = None) -> dict[str, Any]:
         """Handle MCP management actions in worker process."""
         try:
-            from tools.mcp_tool import (
-                discover_mcp_tools,
-                mcp_prefixed_tool_name,
-                register_mcp_servers,
-                _run_on_mcp_loop,
-                _servers,
-                _lock,
-            )
+            import tools.mcp_tool as mcp_tool
         except ImportError:
             return {"error": "MCP tool module not available", "ok": False}
+        install_mcp_apps_adapter(mcp_tool)
+        discover_mcp_tools = mcp_tool.discover_mcp_tools
+        mcp_prefixed_tool_name = mcp_tool.mcp_prefixed_tool_name
+        register_mcp_servers = mcp_tool.register_mcp_servers
+        _run_on_mcp_loop = mcp_tool._run_on_mcp_loop
+        _servers = mcp_tool._servers
+        _lock = mcp_tool._lock
 
         if profile is None:
             profile = _worker_profile() or "default"
@@ -401,6 +404,7 @@ class BridgeServer:
         if action == "mcp_portable_reload":
             try:
                 from hermes_cli.plugins import discover_plugins, get_plugin_manager
+                from tools.mcp_tool import _interpolate_env_vars
             except ImportError:
                 return {
                     "error": "Portable Agent Plugins are not supported by this Hermes runtime",
@@ -414,6 +418,7 @@ class BridgeServer:
                 register_mcp_servers,
                 discover_plugins,
                 get_plugin_manager,
+                _interpolate_env_vars,
             )
 
         dispatch = {
@@ -755,14 +760,25 @@ class BridgeServer:
             return {"ok": False, "code": "mcp_app_invalid_tool", "error": "tool_name is required"}
 
         config = self._read_mcp_config(profile)
+        mcp_configs = config.get("mcp_servers", {}) or {} if config else {}
         allowed_servers = self._profile_mcp_server_names(profile, config)
         with _lock:
             snapshot = [(name, task) for name, task in _servers.items() if name in allowed_servers]
 
         for server_name, task in snapshot:
+            server_config = mcp_configs.get(server_name, {}) if isinstance(mcp_configs.get(server_name), dict) else {}
+            tools_filter = server_config.get("tools") if isinstance(server_config.get("tools"), dict) else {}
+            has_include_filter = "include" in tools_filter
+            has_exclude_filter = "exclude" in tools_filter
+            include_set = set(tools_filter.get("include") or [])
+            exclude_set = set(tools_filter.get("exclude") or [])
             for mcp_tool in getattr(task, "_tools", []):
                 raw_name = str(getattr(mcp_tool, "name", "") or "")
                 if not raw_name or prefixed_tool_name(server_name, raw_name) != registered_name:
+                    continue
+                if has_include_filter and raw_name not in include_set:
+                    continue
+                if has_exclude_filter and raw_name in exclude_set:
                     continue
                 tool_meta = _jsonable(self._mcp_field(mcp_tool, "meta", "_meta") or {})
                 resource_uri = self._mcp_app_resource_uri(tool_meta)
@@ -802,6 +818,27 @@ class BridgeServer:
                         continue
                     mime_type = self._mcp_field(content, "mime_type", "mimeType")
                     text = self._mcp_field(content, "text")
+                    if self._is_mcp_app_mime(mime_type) and not isinstance(text, str):
+                        blob = self._mcp_field(content, "blob")
+                        if isinstance(blob, str):
+                            max_blob_chars = 4 * ((self.MAX_MCP_APP_RESOURCE_BYTES + 2) // 3)
+                            if len(blob) > max_blob_chars:
+                                return {
+                                    "ok": False,
+                                    "code": "mcp_app_resource_too_large",
+                                    "error": "The MCP App resource exceeds the 1 MiB limit",
+                                }
+                            try:
+                                raw = base64.b64decode(blob, validate=True)
+                                if len(raw) > self.MAX_MCP_APP_RESOURCE_BYTES:
+                                    return {
+                                        "ok": False,
+                                        "code": "mcp_app_resource_too_large",
+                                        "error": "The MCP App resource exceeds the 1 MiB limit",
+                                    }
+                                text = raw.decode("utf-8")
+                            except (binascii.Error, ValueError, UnicodeDecodeError):
+                                text = None
                     if not self._is_mcp_app_mime(mime_type) or not isinstance(text, str):
                         return {
                             "ok": False,
@@ -814,9 +851,7 @@ class BridgeServer:
                             "code": "mcp_app_resource_too_large",
                             "error": "The MCP App resource exceeds the 1 MiB limit",
                         }
-                    return {
-                        "ok": True,
-                        "tool": {
+                    tool = {
                             "name": registered_name,
                             "raw_name": raw_name,
                             "server": server_name,
@@ -831,7 +866,14 @@ class BridgeServer:
                                 self._mcp_field(mcp_tool, "annotations") or {}
                             ),
                             "_meta": tool_meta,
-                        },
+                    }
+                    title = self._mcp_field(mcp_tool, "title")
+                    if isinstance(title, str) and title:
+                        tool["title"] = title
+                    return {
+                        "ok": True,
+                        "app": resolve_mcp_app_identity(server_name),
+                        "tool": tool,
                         "resource": {
                             "uri": resource_uri,
                             "mimeType": str(mime_type),
@@ -852,21 +894,28 @@ class BridgeServer:
         }
 
     def _mcp_portable_reload(self, profile: str, _servers, _lock, run_on_mcp_loop,
-                             register_mcp_servers, discover_plugins, get_plugin_manager) -> dict[str, Any]:
+                             register_mcp_servers, discover_plugins, get_plugin_manager,
+                             interpolate_env_vars=None) -> dict[str, Any]:
+        if interpolate_env_vars is None:
+            interpolate_env_vars = lambda config: config
         with _profile_env(profile):
             manager = get_plugin_manager()
             old_names = set(manager.get_portable_mcp_servers())
             discover_plugins(force=True)
-            configs = get_plugin_manager().get_portable_mcp_servers()
+            configs = {
+                name: resolved
+                for name, config in get_plugin_manager().get_portable_mcp_servers().items()
+                if isinstance((resolved := interpolate_env_vars(config)), dict)
+            }
 
-        new_names = set(configs)
-        with _lock:
-            connected_names = set(_servers)
-        replace_names = sorted((old_names | new_names) & connected_names)
-        stopped = self._shutdown_mcp_servers(
-            replace_names, _servers, _lock, run_on_mcp_loop
-        )
-        tools = register_mcp_servers(configs) if configs else []
+            new_names = set(configs)
+            with _lock:
+                connected_names = set(_servers)
+            replace_names = sorted((old_names | new_names) & connected_names)
+            stopped = self._shutdown_mcp_servers(
+                replace_names, _servers, _lock, run_on_mcp_loop
+            )
+            tools = register_mcp_servers(configs) if configs else []
         return {
             "ok": True,
             "stopped": stopped,

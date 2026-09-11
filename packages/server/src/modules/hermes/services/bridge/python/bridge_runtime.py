@@ -835,9 +835,11 @@ def _load_enabled_toolsets() -> list[str] | None:
 def _discover_bridge_mcp_tools() -> list[str]:
     _ensure_agent_imports()
     try:
-        from tools.mcp_tool import discover_mcp_tools
+        from bridge_mcp_apps import install_mcp_apps_adapter
+        import tools.mcp_tool as mcp_tool
 
-        tools = discover_mcp_tools()
+        install_mcp_apps_adapter(mcp_tool)
+        tools = mcp_tool.discover_mcp_tools()
         return list(tools) if isinstance(tools, list) else []
     except Exception as exc:
         print(

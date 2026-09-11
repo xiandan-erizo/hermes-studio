@@ -43,4 +43,9 @@ describe('Marketplace install state', () => {
     expect(findMarketplaceSkillInstall('legacy-tools', 'legacy-child', false, installed)?.skill).toBe('legacy-child')
     expect(findMarketplaceSkillInstall('legacy-tools', 'other-child', false, installed)).toBeNull()
   })
+
+  it('does not match a same-named legacy skill from another plugin', () => {
+    const duplicate = [{ ...installed[1], plugin: 'other-tools' }, ...installed]
+    expect(findMarketplaceSkillInstall('legacy-tools', 'legacy-child', false, duplicate)?.plugin).toBe('legacy-tools')
+  })
 })

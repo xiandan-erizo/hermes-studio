@@ -2,6 +2,7 @@ import { socialMessagesJa } from '../social-messages-locales'
 
 export default {
   mcpApp: {
+    application: "アプリ",
     loadFailed: "結果ビューを読み込めませんでした。再試行するか、以下のテキスト結果を確認してください。",
   },
   ekkoConfig: {

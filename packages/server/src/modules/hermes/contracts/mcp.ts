@@ -33,9 +33,12 @@ export interface McpToolEntry {
 
 export interface McpAppResolveResponse extends McpActionResult {
   code?: string
+  sandboxOrigin?: string
+  app?: { id: string; name: string; version?: string }
   tool?: {
     name: string
     raw_name: string
+    title?: string
     server: string
     description: string
     input_schema: Record<string, unknown>

@@ -124,12 +124,13 @@ async function readPluginManifest(pluginDir: string, pluginName: string): Promis
   return compatibility ? { manifest: compatibility, portable: false } : null
 }
 
-async function scanSkillsDir(pluginDir: string, pluginName: string): Promise<SkillScanResult[]> {
+async function scanSkillsDir(pluginDir: string, pluginName: string, required = true): Promise<SkillScanResult[]> {
   const skillsRoot = join(pluginDir, 'skills')
   let entries: import('fs').Dirent[]
   try {
     entries = await readdir(skillsRoot, { withFileTypes: true })
   } catch {
+    if (!required) return []
     throw new MarketplaceParseError(`plugins/${pluginName}/skills/ is required`)
   }
   const results: SkillScanResult[] = []
@@ -151,7 +152,7 @@ async function scanSkillsDir(pluginDir: string, pluginName: string): Promise<Ski
       : undefined
     results.push({ name: entry.name, description, allowedTools, skillDir })
   }
-  if (results.length === 0) {
+  if (required && results.length === 0) {
     throw new MarketplaceParseError(`plugins/${pluginName}/skills/ must contain at least one skill with SKILL.md`)
   }
   return results
@@ -212,7 +213,7 @@ export async function scanMarketplaceRepo(repoDir: string): Promise<MarketplaceP
     const manifestResult = await readPluginManifest(pluginDir, entry.name)
     if (!manifestResult) continue
 
-    const skills = await scanSkillsDir(pluginDir, entry.name)
+    const skills = await scanSkillsDir(pluginDir, entry.name, !manifestResult.portable)
     for (const skill of skills) {
       if (seenSkills.has(skill.name)) {
         throw new MarketplaceParseError(`Skill ${skill.name} is defined more than once`)
@@ -274,8 +275,8 @@ export async function readPluginDetail(repoDir: string, pluginName: string): Pro
   const pluginDir = join(resolve(repoDir), 'plugins', pluginName)
   const manifestResult = await readPluginManifest(pluginDir, pluginName)
   if (!manifestResult) return null
-  const scanned = await scanSkillsDir(pluginDir, pluginName).catch(() => [] as SkillScanResult[])
-  if (scanned.length === 0) return null
+  const scanned = await scanSkillsDir(pluginDir, pluginName, !manifestResult.portable)
+  if (!manifestResult.portable && scanned.length === 0) return null
 
   const summary = pluginFromManifest(
     pluginName,

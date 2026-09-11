@@ -14,5 +14,7 @@ export function findMarketplaceSkillInstall(
   installed: MarketplaceInstalledSkill[],
 ): MarketplaceInstalledSkill | null {
   if (portable) return findMarketplacePluginInstall(pluginName, installed)
-  return installed.find(entry => entry.installKind !== 'plugin' && entry.skill === skillName) || null
+  return installed.find(entry =>
+    entry.installKind === 'skill' && entry.plugin === pluginName && entry.skill === skillName,
+  ) || null
 }

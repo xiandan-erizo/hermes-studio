@@ -111,40 +111,55 @@ async function directoryHash(dir: string): Promise<string> {
  * so a hostile repo cannot smuggle absolute-path links into the skills tree.
  */
 async function copyPackageDir(sourceDir: string, targetDir: string): Promise<void> {
-  const sourceRoot = resolve(sourceDir)
+  const sourceRoot = await realpath(sourceDir)
   let totalBytes = 0
+  const activeDirectories = new Set<string>()
+
+  function includeFile(size: number): void {
+    totalBytes += size
+    if (totalBytes > MAX_INSTALL_BYTES) {
+      throw new MarketplaceInstallError(`Package is too large to install (max ${MAX_INSTALL_BYTES / 1024 / 1024}MB)`, 413)
+    }
+  }
+
   async function walk(current: string, prefix: string): Promise<void> {
-    const entries = await readdir(current, { withFileTypes: true })
-    for (const entry of entries) {
-      if (['.git', '.pytest_cache', '__pycache__', 'node_modules'].includes(entry.name)) continue
-      const entryPath = join(current, entry.name)
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name
-      const info = await lstat(entryPath)
-      if (info.isDirectory()) {
-        await mkdir(join(targetDir, rel), { recursive: true })
-        await walk(entryPath, rel)
-      } else if (info.isFile()) {
-        totalBytes += info.size
-        if (totalBytes > MAX_INSTALL_BYTES) {
-          throw new MarketplaceInstallError(`Package is too large to install (max ${MAX_INSTALL_BYTES / 1024 / 1024}MB)`, 413)
-        }
-        const dest = join(targetDir, rel)
-        await mkdir(resolve(dest, '..'), { recursive: true })
-        await copyFile(entryPath, dest)
-      } else if (info.isSymbolicLink()) {
-        const resolvedTarget = await realpath(entryPath).catch(() => null)
-        if (!resolvedTarget || !isPathWithin(resolvedTarget, sourceRoot)) continue
-        const statResult = await stat(resolvedTarget)
-        if (statResult.isDirectory()) {
+    const canonicalCurrent = await realpath(current)
+    if (activeDirectories.has(canonicalCurrent)) {
+      throw new MarketplaceInstallError('Package contains a cyclic directory symbolic link')
+    }
+    activeDirectories.add(canonicalCurrent)
+    try {
+      const entries = await readdir(current, { withFileTypes: true })
+      for (const entry of entries) {
+        if (['.git', '.pytest_cache', '__pycache__', 'node_modules'].includes(entry.name)) continue
+        const entryPath = join(current, entry.name)
+        const rel = prefix ? `${prefix}/${entry.name}` : entry.name
+        const info = await lstat(entryPath)
+        if (info.isDirectory()) {
           await mkdir(join(targetDir, rel), { recursive: true })
-          await walk(resolvedTarget, rel)
-        } else if (statResult.isFile()) {
-          totalBytes += statResult.size
+          await walk(entryPath, rel)
+        } else if (info.isFile()) {
+          includeFile(info.size)
           const dest = join(targetDir, rel)
           await mkdir(resolve(dest, '..'), { recursive: true })
-          await copyFile(resolvedTarget, dest)
+          await copyFile(entryPath, dest)
+        } else if (info.isSymbolicLink()) {
+          const resolvedTarget = await realpath(entryPath).catch(() => null)
+          if (!resolvedTarget || !isPathWithin(resolvedTarget, sourceRoot)) continue
+          const statResult = await stat(resolvedTarget)
+          if (statResult.isDirectory()) {
+            await mkdir(join(targetDir, rel), { recursive: true })
+            await walk(resolvedTarget, rel)
+          } else if (statResult.isFile()) {
+            includeFile(statResult.size)
+            const dest = join(targetDir, rel)
+            await mkdir(resolve(dest, '..'), { recursive: true })
+            await copyFile(resolvedTarget, dest)
+          }
         }
       }
+    } finally {
+      activeDirectories.delete(canonicalCurrent)
     }
   }
   await mkdir(targetDir, { recursive: true })
@@ -188,6 +203,12 @@ export async function installMarketplaceSkill(input: InstallSkillInput): Promise
 
   const lock = await readMarketplaceLock(skillsDir)
   const existingEntry = lock[skill]
+  if (existingEntry?.installKind === 'plugin') {
+    throw new MarketplaceInstallError(
+      `"${skill}" is installed as portable plugin "${existingEntry.plugin}". Uninstall it before installing a legacy skill with the same name.`,
+      409,
+    )
+  }
   let targetExists = false
   try {
     targetExists = (await stat(targetDir)).isDirectory()
@@ -207,44 +228,54 @@ export async function installMarketplaceSkill(input: InstallSkillInput): Promise
   }
 
   await mkdir(skillsDir, { recursive: true })
-  await rm(targetDir, { recursive: true, force: true })
+  const transactionId = randomUUID()
+  const stagingDir = join(resolve(skillsDir), `.marketplace-${skill}-${transactionId}`)
+  const backupDir = join(resolve(skillsDir), `.marketplace-backup-${skill}-${transactionId}`)
+  let backedUp = false
+  let installed = false
   try {
-    await copyPackageDir(sourceDir, targetDir)
-  } catch (err) {
-    // Roll back to the previous state on a failed copy.
-    await rm(targetDir, { recursive: true, force: true })
-    if (existingEntry) {
-      // The old tree is already gone; the lock entry is removed with it.
-      delete lock[skill]
-      await writeMarketplaceLock(skillsDir, lock)
+    await copyPackageDir(sourceDir, stagingDir)
+    const contentHash = await directoryHash(stagingDir)
+    if (targetExists) {
+      await rename(targetDir, backupDir)
+      backedUp = true
     }
+    await rename(stagingDir, targetDir)
+    installed = true
+
+    const now = new Date().toISOString()
+    const nextLock: MarketplaceLock = {
+      ...lock,
+      [skill]: {
+        sourceId: source.id,
+        sourceName: source.name,
+        url: source.url,
+        plugin,
+        skill,
+        version: input.version || '',
+        contentHash,
+        installedAt: existingEntry?.installedAt || now,
+        updatedAt: now,
+        installKind: 'skill',
+      },
+    }
+    await writeMarketplaceLock(skillsDir, nextLock)
+    if (backedUp) await rm(backupDir, { recursive: true, force: true }).catch(() => undefined)
+
+    return {
+      skill,
+      plugin,
+      installKind: 'skill',
+      updated: !!existingEntry,
+      installPath: targetDir,
+      version: input.version || '',
+      contentHash,
+    }
+  } catch (err) {
+    await rm(stagingDir, { recursive: true, force: true })
+    if (installed) await rm(targetDir, { recursive: true, force: true })
+    if (backedUp) await rename(backupDir, targetDir).catch(() => undefined)
     throw err
-  }
-
-  const contentHash = await directoryHash(targetDir)
-  const now = new Date().toISOString()
-  lock[skill] = {
-    sourceId: source.id,
-    sourceName: source.name,
-    url: source.url,
-    plugin,
-    skill,
-    version: input.version || '',
-    contentHash,
-    installedAt: existingEntry?.installedAt || now,
-    updatedAt: now,
-    installKind: 'skill',
-  }
-  await writeMarketplaceLock(skillsDir, lock)
-
-  return {
-    skill,
-    plugin,
-    installKind: 'skill',
-    updated: !!existingEntry,
-    installPath: targetDir,
-    version: input.version || '',
-    contentHash,
   }
 }
 
@@ -300,6 +331,12 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
 
   const lock = await readMarketplaceLock(skillsDir)
   const existingEntry = lock[plugin]
+  if (existingEntry?.installKind === 'skill' && existingEntry.plugin !== plugin) {
+    throw new MarketplaceInstallError(
+      `"${plugin}" is already installed as a skill from plugin "${existingEntry.plugin}". Uninstall it before installing this portable plugin.`,
+      409,
+    )
+  }
   if (existingEntry && existingEntry.sourceId !== source.id) {
     throw new MarketplaceInstallError(
       `"${plugin}" is installed from source "${existingEntry.sourceName}". Uninstall it before installing from "${source.name}".`,
@@ -384,9 +421,16 @@ export async function uninstallMarketplaceSkill(skillsDir: string, skill: string
   }
   const resolvedSkillsDir = resolve(skillsDir)
   const profileDir = resolve(resolvedSkillsDir, '..')
+  const pluginsDir = join(profileDir, 'plugins')
+  if (entry.installKind === 'plugin' && !SKILL_NAME_PATTERN.test(entry.plugin)) {
+    throw new MarketplaceInstallError('Invalid plugin name in marketplace lock', 400)
+  }
   const targetDir = entry.installKind === 'plugin'
-    ? join(profileDir, 'plugins', entry.plugin)
+    ? join(pluginsDir, entry.plugin)
     : join(resolvedSkillsDir, skill)
+  if (!isPathWithin(targetDir, entry.installKind === 'plugin' ? pluginsDir : resolvedSkillsDir)) {
+    throw new MarketplaceInstallError('Invalid install path', 400)
+  }
   if (entry.installKind === 'plugin') {
     await updateProfilePluginConfig(profileDir, entry.plugin, false)
   }

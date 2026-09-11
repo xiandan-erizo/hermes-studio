@@ -23,6 +23,7 @@ import {
 import { uploadRoutes } from '../modules/studio/routes/upload'
 import { appUploadRoutes } from '../modules/studio/routes/app-upload'
 import { authPublicRoutes, authProtectedRoutes } from '../modules/studio/routes/auth'
+import { mcpAppSandboxRoutes } from '../modules/studio/routes/mcp-app-sandbox'
 import { requireElevatedApi } from '../modules/studio/public/auth'
 import { mcuDeviceRoutes } from '../modules/studio/routes/mcu-devices'
 
@@ -81,6 +82,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
 
   // --- Public routes (no auth required) ---
   app.use(healthRoutes.routes())
+  app.use(mcpAppSandboxRoutes.routes())
   app.use(authPublicRoutes.routes())
   app.use(devicePublicRoutes.routes())
   app.use(claudeCodeProxyRoutes.routes())

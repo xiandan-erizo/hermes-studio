@@ -36,6 +36,8 @@ describe('buildResumeMessages', () => {
     ['standard', { content: [{ type: 'text', text: structuredResult.result }], structuredContent: structuredResult.structuredContent, _meta: structuredResult._meta }],
     ['Hermes', structuredResult],
     ['wrapped', { output: JSON.stringify(structuredResult), exit_code: 0 }],
+    ['content-only', { content: [{ type: 'text', text: 'Ticket details. '.repeat(200) }] }],
+    ['Hermes text-only', { result: 'Ticket details. '.repeat(200) }],
   ])('preserves the complete %s MCP result in history, live delivery, and event replay', (_name, result) => {
     const content = JSON.stringify(result)
     const persisted = message({ tool_name: mcpToolName, content })
@@ -54,9 +56,9 @@ describe('buildResumeMessages', () => {
     expect(event.output).toBe(content)
   })
 
-  it('retains the ordinary text limit for MCP calls without structured results and non-MCP calls', () => {
+  it('retains the ordinary text limit for unrecognized output and non-MCP calls', () => {
     for (const [toolName, result] of [
-      [mcpToolName, { result: 'x'.repeat(4_000) }],
+      [mcpToolName, { raw: 'x'.repeat(4_000) }],
       ['terminal', structuredResult],
     ] as const) {
       const content = JSON.stringify(result)
@@ -76,6 +78,24 @@ describe('buildResumeMessages', () => {
       expect(output.length).toBeLessThanOrEqual(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
       expect(output).toContain('truncated')
       expect(() => JSON.parse(output)).toThrow()
+    }
+  })
+
+  it('applies the MCP byte limit before preserving a unified diff', () => {
+    const content = [
+      'diff --git a/ticket.txt b/ticket.txt',
+      '--- a/ticket.txt',
+      '+++ b/ticket.txt',
+      '@@ -1 +1 @@',
+      `+${'票'.repeat(100_000)}`,
+    ].join('\n')
+
+    const [history] = buildResumeMessages([message({ tool_name: mcpToolName, content })])
+    const live = buildOutboundRunEvent('tool.completed', { tool: mcpToolName, output: content })
+
+    for (const output of [history.content, live.output]) {
+      expect(output.length).toBeLessThanOrEqual(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
+      expect(output).toContain('truncated')
     }
   })
 

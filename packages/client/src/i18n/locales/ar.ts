@@ -2,6 +2,7 @@ import { socialMessagesAr } from '../social-messages-locales'
 
 export default {
   mcpApp: {
+    application: "تطبيق",
     loadFailed: "تعذر تحميل عرض النتيجة. أعد المحاولة أو اقرأ النتيجة النصية أدناه.",
   },
   ekkoConfig: {

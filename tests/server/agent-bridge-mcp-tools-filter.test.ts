@@ -109,6 +109,7 @@ print(json.dumps({
   it('forwards app metadata and reads only the resource declared by a portable MCP tool', () => {
     const result = runPython(String.raw`
 import asyncio
+import base64
 import importlib.util
 import json
 import sys
@@ -127,8 +128,9 @@ class Annotations:
         return {"readOnlyHint": True, "destructiveHint": False}
 
 class Tool:
-    def __init__(self, name, meta=None):
+    def __init__(self, name, meta=None, title=None):
         self.name = name
+        self.title = title
         self.description = f"{name} description"
         self.inputSchema = {"type": "object"}
         self.outputSchema = {"type": "object", "required": ["kind"]}
@@ -136,10 +138,11 @@ class Tool:
         self.meta = meta
 
 class Content:
-    def __init__(self, mime="text/html;profile=mcp-app", text="<html><body>ticket</body></html>"):
+    def __init__(self, mime="text/html;profile=mcp-app", text="<html><body>ticket</body></html>", blob=None):
         self.uri = "ui://ticket/view-v1.html"
         self.mimeType = mime
         self.text = text
+        self.blob = blob
         self.meta = {"ui": {"prefersBorder": False, "csp": {"connectDomains": []}}}
 
 class Result:
@@ -168,7 +171,8 @@ class Task:
 
     def __init__(self):
         self._tools = [
-            Tool("render", {"ui": {"resourceUri": "ui://ticket/view-v1.html"}}),
+            Tool("render", {"ui": {"resourceUri": "ui://ticket/view-v1.html"}}, "Ticket preview"),
+            Tool("hidden", {"ui": {"resourceUri": "ui://ticket/view-v1.html"}}),
             Tool("plain"),
         ]
         self._registered_tool_names = ["mcp__portable__render", "mcp__portable__plain"]
@@ -176,8 +180,13 @@ class Task:
         self._rpc_lock = AsyncLock()
 
 server = bridge.BridgeServer("tcp://127.0.0.1:0")
-server._read_mcp_config = lambda _profile: {"mcp_servers": {}}
+server._read_mcp_config = lambda _profile: {"mcp_servers": {"portable": {"tools": {"exclude": ["hidden"]}}}}
 server._portable_mcp_server_names = lambda _profile: {"portable"}
+bridge._server.resolve_mcp_app_identity = lambda server_name: {
+    "id": "ticket-intake",
+    "name": "Ticket Intake",
+    "version": "4.0.2",
+}
 task = Task()
 servers = {"portable": task}
 lock = threading.RLock()
@@ -192,6 +201,9 @@ resolved = server._mcp_app_resolve(
 plain = server._mcp_app_resolve(
     {"tool_name": "mcp__portable__plain"}, "research", servers, lock, run, prefixed,
 )
+hidden = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__hidden"}, "research", servers, lock, run, prefixed,
+)
 task.session.content = Content(mime="text/html")
 wrong_mime = server._mcp_app_resolve(
     {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
@@ -200,13 +212,37 @@ task.session.content = Content(text="x" * (1024 * 1024 + 1))
 oversized = server._mcp_app_resolve(
     {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
 )
+task.session.content = Content(text=None, blob=base64.b64encode("<p>工单</p>".encode("utf-8")).decode("ascii"))
+blob = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
+task.session.content = Content(text=None, blob=base64.b64encode(b"\xff\xfe").decode("ascii"))
+invalid_utf8 = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
+task.session.content = Content(text=None, blob="A" * (4 * ((server.MAX_MCP_APP_RESOURCE_BYTES + 2) // 3) + 4))
+original_b64decode = bridge._server.base64.b64decode
+bridge._server.base64.b64decode = lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("oversized blob was decoded"))
+oversized_blob = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
+bridge._server.base64.b64decode = original_b64decode
+task.session.content = Content(text=None, blob="%%%");
+malformed_blob = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
 
 print(json.dumps({
     "listed": listed,
     "resolved": resolved,
     "plain": plain,
+    "hidden": hidden,
     "wrong_mime": wrong_mime,
     "oversized": oversized,
+    "blob": blob,
+    "invalid_utf8": invalid_utf8,
+    "oversized_blob": oversized_blob,
+    "malformed_blob": malformed_blob,
     "read": task.session.read,
 }))
 `)
@@ -222,8 +258,10 @@ print(json.dumps({
       ok: true,
       tool: {
         name: 'mcp__portable__render', raw_name: 'render', server: 'portable',
+        title: 'Ticket preview',
         annotations: { readOnlyHint: true, destructiveHint: false },
       },
+      app: { id: 'ticket-intake', name: 'Ticket Intake', version: '4.0.2' },
       resource: {
         uri: 'ui://ticket/view-v1.html',
         mimeType: 'text/html;profile=mcp-app',
@@ -232,8 +270,16 @@ print(json.dumps({
       },
     })
     expect(result.plain).toMatchObject({ ok: false, code: 'mcp_app_not_found' })
+    expect(result.hidden).toMatchObject({ ok: false, code: 'mcp_app_not_found' })
     expect(result.wrong_mime).toMatchObject({ ok: false, code: 'mcp_app_invalid_resource' })
     expect(result.oversized).toMatchObject({ ok: false, code: 'mcp_app_resource_too_large' })
+    expect(result.blob).toMatchObject({
+      ok: true,
+      resource: { text: '<p>工单</p>' },
+    })
+    expect(result.invalid_utf8).toMatchObject({ ok: false, code: 'mcp_app_invalid_resource' })
+    expect(result.oversized_blob).toMatchObject({ ok: false, code: 'mcp_app_resource_too_large' })
+    expect(result.malformed_blob).toMatchObject({ ok: false, code: 'mcp_app_invalid_resource' })
     expect(result.read[0]).toBe('ui://ticket/view-v1.html')
     expect(result.read).not.toContain('file:///etc/passwd')
   })

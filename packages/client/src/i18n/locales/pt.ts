@@ -2,6 +2,7 @@ import { socialMessagesPt } from '../social-messages-locales'
 
 export default {
   mcpApp: {
+    application: "Aplicativo",
     loadFailed: "Não foi possível carregar a visualização do resultado. Tente novamente ou leia o resultado em texto abaixo.",
   },
   ekkoConfig: {
