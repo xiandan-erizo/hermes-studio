@@ -17,6 +17,8 @@ import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
 import LiveReasoningStatus from "./LiveReasoningStatus.vue";
 import ToolRunCard from "./ToolRunCard.vue";
+import McpAppResultCard from "./McpAppResultCard.vue";
+import { includeMcpAppResults } from "@/utils/hermes/mcp-app-result";
 import MessageQueueFloatPanel from "./MessageQueueFloatPanel.vue";
 import PendingInteractionCountdown from "./PendingInteractionCountdown.vue";
 import { LIVE_CHAT_MAX_LOADED_MESSAGES, parseMessageReference, useChatStore, type Message } from "@/stores/hermes/chat";
@@ -210,7 +212,7 @@ function hasRenderableAssistantContent(message: Message): boolean {
 }
 
 const displayMessages = computed(() => {
-  const messages = chatStore.messages;
+  const messages = includeMcpAppResults(chatStore.messages);
   const currentToolIds = new Set(currentToolCalls.value.map((tool) => tool.id));
   const renderedMessages = messages
     .filter((m) => {
@@ -668,6 +670,7 @@ defineExpose({
           :run-id="msg.toolRunId"
           :tools="msg.toolMessages"
         />
+        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" />
         <div v-else-if="msg.systemType === 'fork-divider' && forkLineage" class="fork-divider" role="separator">
           <div class="fork-divider-line" aria-hidden="true"></div>
           <div class="fork-divider-pill">

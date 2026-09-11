@@ -41,6 +41,15 @@ describe('role-based HTTP route access', () => {
     }
   })
 
+  it('lets a plain user reach the profile-scoped MCP App resolver', async () => {
+    const response = await fetch(`${baseUrl}/api/hermes/mcp/apps/resolve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(response.status).not.toBe(403)
+  })
+
   it('requires a validated Profile for the plain-user display config', async () => {
     const response = await fetch(`${baseUrl}/api/hermes/config`, {
       headers: { 'x-test-no-profile': '1' },

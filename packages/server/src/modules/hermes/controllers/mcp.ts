@@ -118,3 +118,19 @@ export async function reloadMcp(ctx: Context) {
     ctx.body = { error: err.message || 'Failed to reload MCP' }
   }
 }
+
+export async function resolveApp(ctx: Context) {
+  const toolName = String(((ctx.request.body || {}) as Record<string, unknown>).toolName || '').trim()
+  if (!toolName.startsWith('mcp__') || toolName.length > 256 || /[\x00-\x1f]/.test(toolName)) {
+    ctx.status = 400
+    ctx.body = { error: 'Valid MCP toolName is required' }
+    return
+  }
+  try {
+    ctx.body = await bridgeMcpAction('mcp_app_resolve', { toolName }, getProfile(ctx))
+  } catch (err: any) {
+    const code = String(err?.response?.code || '')
+    ctx.status = code === 'mcp_app_not_found' ? 404 : 503
+    ctx.body = { error: err.message || 'MCP App resource is unavailable', ...(code ? { code } : {}) }
+  }
+}

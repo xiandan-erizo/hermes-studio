@@ -59,7 +59,7 @@ import { chatRunRoutes } from '../modules/studio/routes/chat-run'
 import { chatWebhookPublicRoutes, chatWebhookRoutes } from '../modules/studio/routes/chat-webhooks'
 import { performanceMonitorRoutes } from '../modules/studio/routes/performance-monitor'
 import { journeyRoutes } from '../modules/hermes/routes/journey'
-import { mcpRoutes } from '../modules/hermes/routes/mcp'
+import { mcpAppRoutes, mcpRoutes } from '../modules/hermes/routes/mcp'
 import { runtimeVersionRoutes } from '../modules/hermes/routes/runtime-versions'
 import { agentStatusRoutes } from '../modules/studio/routes/agent-status'
 import { writeGateRoutes } from '../modules/hermes/routes/write-gate'
@@ -106,6 +106,7 @@ export function registerRoutes(app: any, authMiddleware: Array<(ctx: Context, ne
   app.use(ttsProtectedRoutes.routes())
   app.use(sttProtectedRoutes.routes())
   app.use(mediaRoutes.routes())
+  app.use(mcpAppRoutes.routes())
 
   // --- Management routes (admin and super_admin only) ---
   // From here on, plain 'user' accounts receive 403 on /api and /v1 paths.

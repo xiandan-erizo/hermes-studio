@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // ── Mocks ──────────────────────────────────────────────────
 const mcpToolsMock = vi.fn()
+const mcpAppResolveMock = vi.fn()
+const mcpPortableReloadMock = vi.fn()
 
 vi.mock('../../packages/server/src/modules/hermes/services/bridge/client', () => ({
   AgentBridgeClient: vi.fn().mockImplementation(() => ({
     mcpTools: mcpToolsMock,
+    mcpAppResolve: mcpAppResolveMock,
+    mcpPortableReload: mcpPortableReloadMock,
   })),
 }))
 
@@ -52,5 +56,27 @@ describe('bridgeMcpAction - mcp_tools_list', () => {
     const { bridgeMcpAction } = await import('../../packages/server/src/modules/hermes/services/mcp/bridge-actions')
     await bridgeMcpAction('mcp_tools_list', { server: 'github' })
     expect(mcpToolsMock).toHaveBeenCalledWith('github', undefined, undefined)
+  })
+})
+
+describe('bridgeMcpAction - mcp_app_resolve', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('passes the registered tool name and profile to the bridge client', async () => {
+    mcpAppResolveMock.mockResolvedValue({ ok: true, resource: { text: '<html></html>' } })
+    const { bridgeMcpAction } = await import('../../packages/server/src/modules/hermes/services/mcp/bridge-actions')
+    await bridgeMcpAction('mcp_app_resolve', { toolName: 'mcp__ticket__render' }, 'research')
+    expect(mcpAppResolveMock).toHaveBeenCalledWith('mcp__ticket__render', 'research')
+  })
+})
+
+describe('bridgeMcpAction - mcp_portable_reload', () => {
+  it('reloads portable MCP packages in the selected profile', async () => {
+    mcpPortableReloadMock.mockResolvedValue({ ok: true, servers: ['ticket-view'] })
+    const { bridgeMcpAction } = await import('../../packages/server/src/modules/hermes/services/mcp/bridge-actions')
+    await bridgeMcpAction('mcp_portable_reload', {}, 'research')
+    expect(mcpPortableReloadMock).toHaveBeenCalledWith('research')
   })
 })

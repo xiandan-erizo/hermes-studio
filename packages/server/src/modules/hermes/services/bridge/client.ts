@@ -825,6 +825,21 @@ export class AgentBridgeClient {
     return this.request({ action: 'mcp_tools_list', ...(server ? { server } : {}), ...(profile ? { profile } : {}), ...(raw ? { raw } : {}) })
   }
 
+  mcpAppResolve(toolName: string, profile?: string): Promise<McpActionResponse> {
+    return this.request({
+      action: 'mcp_app_resolve',
+      tool_name: toolName,
+      ...(profile ? { profile } : {}),
+    })
+  }
+
+  mcpPortableReload(profile?: string): Promise<McpActionResponse> {
+    return this.request({
+      action: 'mcp_portable_reload',
+      ...(profile ? { profile } : {}),
+    }, { serialize: true, timeoutMs: 180_000 })
+  }
+
   mcpReload(server?: string, profile?: string): Promise<McpActionResponse> {
     return this.request({ action: 'mcp_reload', ...(server ? { server } : {}), ...(profile ? { profile } : {}) }, { serialize: true })
   }

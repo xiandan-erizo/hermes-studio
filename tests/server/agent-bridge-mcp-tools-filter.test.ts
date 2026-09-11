@@ -105,4 +105,136 @@ print(json.dumps({
       exclude_one: ['read_file', 'write_file'],
     })
   })
+
+  it('forwards app metadata and reads only the resource declared by a portable MCP tool', () => {
+    const result = runPython(String.raw`
+import asyncio
+import importlib.util
+import json
+import sys
+import threading
+from pathlib import Path
+
+path = Path("packages/server/src/modules/hermes/services/bridge/python/hermes_bridge.py")
+spec = importlib.util.spec_from_file_location("hermes_bridge_apps", path)
+bridge = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = bridge
+spec.loader.exec_module(bridge)
+
+class Annotations:
+    def model_dump(self, *, mode, by_alias, exclude_none):
+        assert mode == "json" and by_alias and exclude_none
+        return {"readOnlyHint": True, "destructiveHint": False}
+
+class Tool:
+    def __init__(self, name, meta=None):
+        self.name = name
+        self.description = f"{name} description"
+        self.inputSchema = {"type": "object"}
+        self.outputSchema = {"type": "object", "required": ["kind"]}
+        self.annotations = Annotations()
+        self.meta = meta
+
+class Content:
+    def __init__(self, mime="text/html;profile=mcp-app", text="<html><body>ticket</body></html>"):
+        self.uri = "ui://ticket/view-v1.html"
+        self.mimeType = mime
+        self.text = text
+        self.meta = {"ui": {"prefersBorder": False, "csp": {"connectDomains": []}}}
+
+class Result:
+    def __init__(self, content):
+        self.contents = [content]
+
+class Session:
+    def __init__(self):
+        self.content = Content()
+        self.read = []
+
+    async def read_resource(self, uri):
+        self.read.append(uri)
+        return Result(self.content)
+
+class AsyncLock:
+    async def __aenter__(self):
+        return self
+    async def __aexit__(self, *_args):
+        return False
+
+class Task:
+    _task = None
+    _error = None
+    _config = {"command": "node"}
+
+    def __init__(self):
+        self._tools = [
+            Tool("render", {"ui": {"resourceUri": "ui://ticket/view-v1.html"}}),
+            Tool("plain"),
+        ]
+        self._registered_tool_names = ["mcp__portable__render", "mcp__portable__plain"]
+        self.session = Session()
+        self._rpc_lock = AsyncLock()
+
+server = bridge.BridgeServer("tcp://127.0.0.1:0")
+server._read_mcp_config = lambda _profile: {"mcp_servers": {}}
+server._portable_mcp_server_names = lambda _profile: {"portable"}
+task = Task()
+servers = {"portable": task}
+lock = threading.RLock()
+run = lambda factory, timeout=30: asyncio.run(factory())
+prefixed = lambda server_name, tool_name: f"mcp__{server_name}__{tool_name}"
+
+listed = server._mcp_tools_list({}, "research", servers, lock)
+resolved = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render", "resource_uri": "file:///etc/passwd"},
+    "research", servers, lock, run, prefixed,
+)
+plain = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__plain"}, "research", servers, lock, run, prefixed,
+)
+task.session.content = Content(mime="text/html")
+wrong_mime = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
+task.session.content = Content(text="x" * (1024 * 1024 + 1))
+oversized = server._mcp_app_resolve(
+    {"tool_name": "mcp__portable__render"}, "research", servers, lock, run, prefixed,
+)
+
+print(json.dumps({
+    "listed": listed,
+    "resolved": resolved,
+    "plain": plain,
+    "wrong_mime": wrong_mime,
+    "oversized": oversized,
+    "read": task.session.read,
+}))
+`)
+
+    const tool = result.listed.results[0].tools[0]
+    expect(tool).toMatchObject({
+      name: 'render',
+      output_schema: { type: 'object', required: ['kind'] },
+      annotations: { readOnlyHint: true },
+      _meta: { ui: { resourceUri: 'ui://ticket/view-v1.html' } },
+    })
+    expect(result.resolved).toMatchObject({
+      ok: true,
+      tool: {
+        name: 'mcp__portable__render', raw_name: 'render', server: 'portable',
+        annotations: { readOnlyHint: true, destructiveHint: false },
+      },
+      resource: {
+        uri: 'ui://ticket/view-v1.html',
+        mimeType: 'text/html;profile=mcp-app',
+        text: '<html><body>ticket</body></html>',
+        _meta: { ui: { prefersBorder: false } },
+      },
+    })
+    expect(result.plain).toMatchObject({ ok: false, code: 'mcp_app_not_found' })
+    expect(result.wrong_mime).toMatchObject({ ok: false, code: 'mcp_app_invalid_resource' })
+    expect(result.oversized).toMatchObject({ ok: false, code: 'mcp_app_resource_too_large' })
+    expect(result.read[0]).toBe('ui://ticket/view-v1.html')
+    expect(result.read).not.toContain('file:///etc/passwd')
+  })
 })

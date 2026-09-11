@@ -35,6 +35,7 @@ export interface MarketplacePlugin {
   name: string
   version: string
   description: string
+  portable: boolean
   author?: string
   interface?: PluginInterfaceInfo
   skills: MarketplaceSkillSummary[]
@@ -52,6 +53,7 @@ export interface MarketplacePluginDetail extends MarketplacePlugin {
 }
 
 const PLUGIN_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const PORTABLE_PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
 const MAX_SKILL_MD_BYTES = 1024 * 1024
 const MAX_FILES_LISTED = 2000
 
@@ -86,15 +88,40 @@ interface SkillScanResult {
   skillDir: string
 }
 
-async function readPluginManifest(pluginDir: string): Promise<Record<string, unknown> | null> {
-  const manifestPath = join(pluginDir, '.codex-plugin', 'plugin.json')
+async function readJsonObject(path: string): Promise<Record<string, unknown> | null> {
   try {
-    const info = await stat(manifestPath)
+    const info = await stat(path)
     if (!info.isFile()) return null
-    const parsed = JSON.parse(await readFile(manifestPath, 'utf-8'))
+    const parsed = JSON.parse(await readFile(path, 'utf-8'))
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
   } catch { /* missing or invalid JSON → treated as absent */ }
   return null
+}
+
+interface PluginManifestResult {
+  manifest: Record<string, unknown>
+  portable: boolean
+}
+
+async function readPluginManifest(pluginDir: string, pluginName: string): Promise<PluginManifestResult | null> {
+  const compatibility = await readJsonObject(join(pluginDir, '.codex-plugin', 'plugin.json'))
+  const root = await readJsonObject(join(pluginDir, 'plugin.json'))
+  const isPortable = root?.$schema === PORTABLE_PLUGIN_SCHEMA && root.name === pluginName
+  if (root && !isPortable) {
+    throw new MarketplaceParseError(`plugins/${pluginName}/plugin.json is not a valid Agent Plugins v1 manifest`)
+  }
+  if (isPortable) {
+    return {
+      portable: true,
+      manifest: {
+        ...(compatibility || {}),
+        ...root,
+        author: root.author ?? compatibility?.author,
+        interface: compatibility?.interface,
+      },
+    }
+  }
+  return compatibility ? { manifest: compatibility, portable: false } : null
 }
 
 async function scanSkillsDir(pluginDir: string, pluginName: string): Promise<SkillScanResult[]> {
@@ -134,6 +161,7 @@ function pluginFromManifest(
   pluginName: string,
   manifest: Record<string, unknown>,
   skills: SkillScanResult[],
+  portable: boolean,
 ): MarketplacePlugin {
   const iface = (manifest.interface && typeof manifest.interface === 'object'
     ? manifest.interface
@@ -146,6 +174,7 @@ function pluginFromManifest(
     name: pluginName,
     version: typeof manifest.version === 'string' ? manifest.version : '',
     description: typeof manifest.description === 'string' ? manifest.description : '',
+    portable,
     author: typeof author === 'string' ? author : undefined,
     interface: {
       displayName: typeof iface.displayName === 'string' ? iface.displayName : undefined,
@@ -180,8 +209,8 @@ export async function scanMarketplaceRepo(repoDir: string): Promise<MarketplaceP
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue
     if (!PLUGIN_NAME_PATTERN.test(entry.name)) continue
     const pluginDir = join(pluginsRoot, entry.name)
-    const manifest = await readPluginManifest(pluginDir)
-    if (!manifest) continue
+    const manifestResult = await readPluginManifest(pluginDir, entry.name)
+    if (!manifestResult) continue
 
     const skills = await scanSkillsDir(pluginDir, entry.name)
     for (const skill of skills) {
@@ -190,7 +219,7 @@ export async function scanMarketplaceRepo(repoDir: string): Promise<MarketplaceP
       }
       seenSkills.add(skill.name)
     }
-    plugins.push(pluginFromManifest(entry.name, manifest, skills))
+    plugins.push(pluginFromManifest(entry.name, manifestResult.manifest, skills, manifestResult.portable))
   }
   return plugins
 }
@@ -210,6 +239,17 @@ export async function resolvePluginSkillDir(
     if (!info.isFile()) return null
   } catch { return null }
   return skillDir
+}
+
+/** Resolve a portable plugin root with path and manifest checks, or null. */
+export async function resolvePortablePluginDir(repoDir: string, pluginName: string): Promise<string | null> {
+  if (!PLUGIN_NAME_PATTERN.test(pluginName)) return null
+  const repoRoot = resolve(repoDir)
+  const pluginDir = resolve(repoRoot, 'plugins', pluginName)
+  if (!isPathWithin(pluginDir, repoRoot)) return null
+  const manifest = await readJsonObject(join(pluginDir, 'plugin.json'))
+  if (manifest?.$schema !== PORTABLE_PLUGIN_SCHEMA || manifest.name !== pluginName) return null
+  return pluginDir
 }
 
 async function listSkillFiles(skillDir: string): Promise<string[]> {
@@ -232,12 +272,17 @@ async function listSkillFiles(skillDir: string): Promise<string[]> {
 export async function readPluginDetail(repoDir: string, pluginName: string): Promise<MarketplacePluginDetail | null> {
   if (!PLUGIN_NAME_PATTERN.test(pluginName)) return null
   const pluginDir = join(resolve(repoDir), 'plugins', pluginName)
-  const manifest = await readPluginManifest(pluginDir)
-  if (!manifest) return null
+  const manifestResult = await readPluginManifest(pluginDir, pluginName)
+  if (!manifestResult) return null
   const scanned = await scanSkillsDir(pluginDir, pluginName).catch(() => [] as SkillScanResult[])
   if (scanned.length === 0) return null
 
-  const summary = pluginFromManifest(pluginName, manifest, scanned)
+  const summary = pluginFromManifest(
+    pluginName,
+    manifestResult.manifest,
+    scanned,
+    manifestResult.portable,
+  )
   const skills: MarketplaceSkillDetail[] = []
   for (const skill of scanned) {
     const raw = await readFile(join(skill.skillDir, 'SKILL.md'), 'utf-8')

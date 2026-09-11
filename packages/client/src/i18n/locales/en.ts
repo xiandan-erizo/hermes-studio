@@ -1,6 +1,9 @@
 import { socialMessagesEn } from '../social-messages'
 
 export default {
+  mcpApp: {
+    loadFailed: "The result view could not load. Retry or read the text result below.",
+  },
   ekkoConfig: {
     "settingsTitle": "Settings",
     "settingsRuntime": "Runtime",

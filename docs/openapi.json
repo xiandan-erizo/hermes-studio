@@ -7688,6 +7688,44 @@
         }
       }
     },
+    "/api/hermes/mcp/apps/resolve": {
+      "post": {
+        "tags": [
+          "MCP"
+        ],
+        "summary": "Create resolve",
+        "description": "POST /api/hermes/mcp/apps/resolve",
+        "operationId": "resolveApp",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/hermes/mcp/reload": {
       "post": {
         "tags": [

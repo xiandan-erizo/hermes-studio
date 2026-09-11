@@ -1,6 +1,9 @@
 import { socialMessagesZh } from '../social-messages'
 
 export default {
+  mcpApp: {
+    loadFailed: "结果视图加载失败，可以重试或查看下方文本结果。",
+  },
   ekkoConfig: {
     "settingsTitle": "设置",
     "settingsRuntime": "运行",

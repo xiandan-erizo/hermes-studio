@@ -10,6 +10,8 @@ import { useI18n } from "vue-i18n";
 import VirtualMessageList from "./VirtualMessageList.vue";
 import MessageItem from "./MessageItem.vue";
 import ToolRunCard from "./ToolRunCard.vue";
+import McpAppResultCard from "./McpAppResultCard.vue";
+import { includeMcpAppResults } from "@/utils/hermes/mcp-app-result";
 import { useChatStore } from "@/stores/hermes/chat";
 import { useToolTraceVisibility } from "@/composables/useToolTraceVisibility";
 import type { Session } from "@/stores/hermes/chat";
@@ -39,9 +41,10 @@ const activeSessionScrollKey = computed(() =>
 const listInstanceKey = computed(() => activeSessionScrollKey.value || "history-empty");
 
 const displayMessages = computed(() =>
-  groupCompletedToolsByRun((activeSession.value?.messages || []).filter((m) => {
+  groupCompletedToolsByRun(includeMcpAppResults(activeSession.value?.messages || []).filter((m) => {
     // Tool messages without a name are internal use only and remain hidden.
     if (m.role === 'tool') return toolTraceVisible.value && !!m.toolName
+    if (m.systemType === 'mcp-app') return true
     // Filter out messages with empty content.
     if (!m.content?.trim()) return false
     return true
@@ -216,6 +219,7 @@ defineExpose({
           :run-id="msg.toolRunId"
           :tools="msg.toolMessages"
         />
+        <McpAppResultCard v-else-if="msg.systemType === 'mcp-app' && msg.mcpApp" :invocation="msg.mcpApp" />
         <MessageItem
           v-else
           :message="msg"

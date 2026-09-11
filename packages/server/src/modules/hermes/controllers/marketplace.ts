@@ -28,11 +28,13 @@ import {
 } from '../services/marketplace/repo-scanner'
 import {
   installMarketplaceSkill,
+  installMarketplacePlugin,
   listMarketplaceInstalled,
   uninstallMarketplaceSkill,
   MarketplaceInstallError,
 } from '../services/marketplace/install'
 import { logger } from '../../studio/public/logging'
+import { bridgeMcpAction } from '../services/mcp/bridge-actions'
 
 /**
  * Plugin marketplace ("插件中心") controllers.
@@ -46,7 +48,11 @@ function requestedProfile(ctx: any): string {
 }
 
 function requestSkillsDir(ctx: any): string {
-  return join(getProfileDir(requestedProfile(ctx)), 'skills')
+  return join(requestProfileDir(ctx), 'skills')
+}
+
+function requestProfileDir(ctx: any): string {
+  return getProfileDir(requestedProfile(ctx))
 }
 
 function sourceIdParam(ctx: any): number | null {
@@ -177,9 +183,9 @@ export async function install(ctx: any) {
   }
   const plugin = String(body.plugin || '').trim()
   const skill = String(body.skill || '').trim()
-  if (!plugin || !skill) {
+  if (!plugin) {
     ctx.status = 400
-    ctx.body = { error: 'plugin and skill are required' }
+    ctx.body = { error: 'plugin is required' }
     return
   }
   const source = findMarketplaceSource(sourceId)
@@ -198,22 +204,47 @@ export async function install(ctx: any) {
     // Make sure the cache exists and records what we install from.
     const { commit } = await syncSource(source.id, source.url, 'ensure')
     recordSourceSync(source.id, { commit })
-    let version = ''
-    try {
-      const detail = await readPluginDetail(marketplaceCacheDir(source.id), plugin)
-      version = detail?.version || ''
-    } catch { /* version is best-effort provenance */ }
-
-    const result = await installMarketplaceSkill({
-      source,
-      repoDir: marketplaceCacheDir(source.id),
-      skillsDir: requestSkillsDir(ctx),
-      plugin,
-      skill,
-      version,
-    })
-    logger.info(`[marketplace] installed skill "${skill}" from source "${source.name}" for profile "${requestedProfile(ctx)}"`)
-    ctx.body = { success: true, ...result }
+    const detail = await readPluginDetail(marketplaceCacheDir(source.id), plugin)
+    if (!detail) {
+      ctx.status = 404
+      ctx.body = { error: `Plugin "${plugin}" was not found` }
+      return
+    }
+    let result
+    if (detail.portable) {
+      result = await installMarketplacePlugin({
+        source,
+        repoDir: marketplaceCacheDir(source.id),
+        profileDir: requestProfileDir(ctx),
+        plugin,
+        version: detail.version || '',
+      })
+    } else {
+      if (!skill) {
+        ctx.status = 400
+        ctx.body = { error: 'skill is required for a legacy plugin' }
+        return
+      }
+      result = await installMarketplaceSkill({
+        source,
+        repoDir: marketplaceCacheDir(source.id),
+        skillsDir: requestSkillsDir(ctx),
+        plugin,
+        skill,
+        version: detail.version || '',
+      })
+    }
+    logger.info(`[marketplace] installed ${detail.portable ? 'plugin' : 'skill'} "${detail.portable ? plugin : skill}" from source "${source.name}" for profile "${requestedProfile(ctx)}"`)
+    let reloadError: string | undefined
+    if (detail.portable) {
+      try {
+        await bridgeMcpAction('mcp_portable_reload', {}, requestedProfile(ctx))
+      } catch (err: any) {
+        reloadError = String(err?.message || err)
+        logger.warn(`[marketplace] portable plugin installed but runtime reload failed: ${reloadError}`)
+      }
+    }
+    ctx.body = { success: true, ...result, ...(reloadError ? { reloadError } : {}) }
   } catch (err: any) {
     if (err instanceof MarketplaceInstallError) {
       ctx.status = err.status
@@ -243,8 +274,17 @@ export async function listInstalled(ctx: any) {
 export async function uninstall(ctx: any) {
   const skill = String((ctx.params as any)?.skill || '')
   try {
-    await uninstallMarketplaceSkill(requestSkillsDir(ctx), skill)
-    ctx.body = { success: true }
+    const removed = await uninstallMarketplaceSkill(requestSkillsDir(ctx), skill)
+    let reloadError: string | undefined
+    if (removed.installKind === 'plugin') {
+      try {
+        await bridgeMcpAction('mcp_portable_reload', {}, requestedProfile(ctx))
+      } catch (err: any) {
+        reloadError = String(err?.message || err)
+        logger.warn(`[marketplace] portable plugin removed but runtime reload failed: ${reloadError}`)
+      }
+    }
+    ctx.body = { success: true, ...(reloadError ? { reloadError } : {}) }
   } catch (err: any) {
     if (err instanceof MarketplaceInstallError) {
       ctx.status = err.status

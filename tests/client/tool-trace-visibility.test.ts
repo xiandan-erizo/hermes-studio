@@ -32,6 +32,17 @@ vi.mock('@/components/hermes/chat/MessageItem.vue', async () => {
   }
 })
 
+vi.mock('@/components/hermes/chat/McpAppResultCard.vue', async () => {
+  const { defineComponent } = await import('vue')
+  return {
+    default: defineComponent({
+      name: 'McpAppResultCard',
+      props: { invocation: { type: Object, required: true } },
+      template: '<div class="stub-mcp-app">{{ invocation.toolName }}</div>',
+    }),
+  }
+})
+
 function makeSession(messages: Message[]): Session {
   return {
     id: 'session-1',
@@ -67,6 +78,29 @@ describe('tool trace visibility', () => {
 
     return mount(MessageList)
   }
+
+  it('shows MCP App results outside folded tool traces in live and history chat', () => {
+    useToolTraceVisibility().setToolTraceVisible(false)
+    const messages: Message[] = [{
+      id: 'app-tool', role: 'tool', content: '', timestamp: 1,
+      toolName: 'mcp__ticket__render_ticket_card', toolStatus: 'done', runMarker: 'run-app',
+      toolResult: JSON.stringify({
+        result: 'You submitted 3 tickets.',
+        structuredContent: { schemaVersion: 1, kind: 'receipt' },
+      }),
+    }]
+    const store = useChatStore()
+    store.activeSessionId = 'session-1'
+    store.activeSession = makeSession(messages)
+    const live = mount(MessageList)
+    const history = mount(HistoryMessageList, { props: { session: makeSession(messages) } })
+
+    for (const wrapper of [live, history]) {
+      expect(wrapper.findAll('.stub-message')).toHaveLength(0)
+      expect(wrapper.get('.stub-mcp-app').text()).toContain('mcp__ticket__render_ticket_card')
+      expect(wrapper.text()).not.toContain('You submitted 3 tickets.')
+    }
+  })
 
   it('shows named transcript and live tool traces by default while keeping unnamed internal tools hidden', () => {
     const wrapper = mountLiveList()

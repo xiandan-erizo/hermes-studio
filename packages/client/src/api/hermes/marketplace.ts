@@ -23,6 +23,7 @@ export interface MarketplacePlugin {
   version: string
   description: string
   author?: string
+  portable: boolean
   interface?: MarketplacePluginInterface
   skills: MarketplaceSkillSummary[]
 }
@@ -57,6 +58,7 @@ export interface MarketplaceInstalledSkill {
   updatedAt: string
   modified: boolean
   installPath: string
+  installKind: 'skill' | 'plugin'
 }
 
 export interface MarketplaceInstallResult {
@@ -66,6 +68,8 @@ export interface MarketplaceInstallResult {
   installPath: string
   version: string
   contentHash: string
+  plugin: string
+  installKind: 'skill' | 'plugin'
 }
 
 export async function fetchMarketplaceSources(): Promise<MarketplaceSource[]> {
@@ -100,6 +104,14 @@ export async function installMarketplaceSkill(sourceId: number, plugin: string, 
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ sourceId, plugin, skill }),
+  })
+}
+
+export async function installMarketplacePlugin(sourceId: number, plugin: string): Promise<MarketplaceInstallResult> {
+  return request<MarketplaceInstallResult>('/api/hermes/marketplace/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sourceId, plugin }),
   })
 }
 

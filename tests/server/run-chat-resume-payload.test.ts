@@ -22,6 +22,63 @@ function message(overrides: Record<string, unknown>) {
 }
 
 describe('buildResumeMessages', () => {
+  const mcpToolName = 'mcp__ticket__render_ticket_card'
+  const structuredResult = {
+    result: '工单草稿已生成。'.repeat(60),
+    structuredContent: {
+      title: '审批页面偶发 500',
+      facts: Array.from({ length: 60 }, (_, index) => ({ label: `字段 ${index}`, value: '完整内容'.repeat(60) })),
+    },
+    _meta: { 'example/view': { version: 1 } },
+  }
+
+  it.each([
+    ['standard', { content: [{ type: 'text', text: structuredResult.result }], structuredContent: structuredResult.structuredContent, _meta: structuredResult._meta }],
+    ['Hermes', structuredResult],
+    ['wrapped', { output: JSON.stringify(structuredResult), exit_code: 0 }],
+  ])('preserves the complete %s MCP result in history, live delivery, and event replay', (_name, result) => {
+    const content = JSON.stringify(result)
+    const persisted = message({ tool_name: mcpToolName, content })
+    const event = { event: 'tool.completed', tool: mcpToolName, output: content, preview: structuredResult.result }
+    expect(content.length).toBeGreaterThan(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
+
+    const [history] = buildResumeMessages([persisted])
+    const live = buildOutboundRunEvent(event.event, event)
+    const [replay] = buildResumeEvents([{ event: event.event, data: event }])
+
+    expect(history.content).toBe(content)
+    expect(live.output).toBe(content)
+    expect(replay.data.output).toBe(content)
+    expect(live.preview.length).toBeLessThanOrEqual(100)
+    expect(persisted.content).toBe(content)
+    expect(event.output).toBe(content)
+  })
+
+  it('retains the ordinary text limit for MCP calls without structured results and non-MCP calls', () => {
+    for (const [toolName, result] of [
+      [mcpToolName, { result: 'x'.repeat(4_000) }],
+      ['terminal', structuredResult],
+    ] as const) {
+      const content = JSON.stringify(result)
+      const [history] = buildResumeMessages([message({ tool_name: toolName, content })])
+      const live = buildOutboundRunEvent('tool.completed', { tool: toolName, output: content })
+      expect(history.content.length).toBeLessThanOrEqual(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
+      expect(live.output.length).toBeLessThanOrEqual(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
+    }
+  })
+
+  it('falls back to text for oversized MCP data instead of rendering partially truncated structured content', () => {
+    // This is below 256 Ki characters but above 256 KiB in UTF-8.
+    const content = JSON.stringify({ structuredContent: { title: '工单', description: '票'.repeat(100_000) } })
+    const [history] = buildResumeMessages([message({ tool_name: mcpToolName, content })])
+    const live = buildOutboundRunEvent('tool.completed', { tool: mcpToolName, output: content })
+    for (const output of [history.content, live.output]) {
+      expect(output.length).toBeLessThanOrEqual(RESUME_TOOL_RESULT_DISPLAY_LIMIT)
+      expect(output).toContain('truncated')
+      expect(() => JSON.parse(output)).toThrow()
+    }
+  })
+
   it('returns only the latest display page without trimming runtime history', () => {
     const history = Array.from({ length: 1_000 }, (_, index) => message({
       id: index + 1,

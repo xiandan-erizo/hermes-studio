@@ -8,6 +8,7 @@ const mcpRemoveMock = vi.fn()
 const mcpTestMock = vi.fn()
 const mcpToolsMock = vi.fn()
 const mcpReloadMock = vi.fn()
+const mcpAppResolveMock = vi.fn()
 
 vi.mock('../../packages/server/src/modules/hermes/services/bridge/client', () => ({
   AgentBridgeClient: vi.fn().mockImplementation(() => ({
@@ -18,6 +19,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/bridge/client', () =>
     mcpTest: mcpTestMock,
     mcpTools: mcpToolsMock,
     mcpReload: mcpReloadMock,
+    mcpAppResolve: mcpAppResolveMock,
   })),
 }))
 
@@ -279,6 +281,38 @@ describe('MCP Controller', () => {
       const ctx = createCtx()
       await reloadMcp(ctx)
       expect(ctx.status).toBe(503)
+    })
+  })
+
+  describe('resolveApp', () => {
+    it('resolves a descriptor-bound app in the authenticated profile', async () => {
+      const resolved = {
+        ok: true,
+        tool: { name: 'mcp__ticket__render' },
+        resource: {
+          uri: 'ui://ticket/view.html',
+          mimeType: 'text/html;profile=mcp-app',
+          text: '<html></html>',
+        },
+      }
+      mcpAppResolveMock.mockResolvedValue(resolved)
+      const { resolveApp } = await import('../../packages/server/src/modules/hermes/controllers/mcp')
+      const ctx = createCtx({ request: { body: { toolName: 'mcp__ticket__render' } } })
+
+      await resolveApp(ctx)
+
+      expect(mcpAppResolveMock).toHaveBeenCalledWith('mcp__ticket__render', 'test-profile')
+      expect(ctx.body).toEqual(resolved)
+    })
+
+    it('rejects non-MCP and oversized tool names before calling the bridge', async () => {
+      const { resolveApp } = await import('../../packages/server/src/modules/hermes/controllers/mcp')
+      for (const toolName of ['', 'terminal', `mcp__${'x'.repeat(300)}`]) {
+        const ctx = createCtx({ request: { body: { toolName } } })
+        await resolveApp(ctx)
+        expect(ctx.status).toBe(400)
+      }
+      expect(mcpAppResolveMock).not.toHaveBeenCalled()
     })
   })
 

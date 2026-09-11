@@ -1,6 +1,9 @@
 import { socialMessagesFr } from '../social-messages-locales'
 
 export default {
+  mcpApp: {
+    loadFailed: "Impossible de charger la vue du résultat. Réessayez ou consultez le résultat textuel ci-dessous.",
+  },
   ekkoConfig: {
     "settingsTitle": "Paramètres",
     "settingsRuntime": "Exécution",

@@ -31,6 +31,7 @@ from bridge_transport import _make_listen_socket, _read_json_request, _write_jso
 class BridgeServer:
     IDLE_TIMEOUT_SECONDS = 30 * 60  # 30 minutes
     GC_INTERVAL_SECONDS = 60  # check every minute
+    MAX_MCP_APP_RESOURCE_BYTES = 1024 * 1024
 
     def __init__(self, endpoint: str) -> None:
         self.endpoint = endpoint
@@ -329,6 +330,14 @@ class BridgeServer:
 
     # ───── MCP Management Methods (for BridgeServer worker process) ─────
 
+    @staticmethod
+    def _mcp_json_object(value: Any) -> dict[str, Any]:
+        # The Python MCP SDK represents annotations as a Pydantic model.
+        # str(model) is not a valid MCP descriptor for the App SDK handshake.
+        if callable(getattr(value, "model_dump", None)):
+            value = value.model_dump(mode="json", by_alias=True, exclude_none=True)
+        return _jsonable(value) if isinstance(value, dict) else {}
+
     def _read_mcp_config(self, profile=None):
         """Read config.yaml for the given profile."""
         import yaml
@@ -375,12 +384,37 @@ class BridgeServer:
     def _handle_mcp_action(self, action: str, req: dict[str, Any], profile: str | None = None) -> dict[str, Any]:
         """Handle MCP management actions in worker process."""
         try:
-            from tools.mcp_tool import discover_mcp_tools, register_mcp_servers, _run_on_mcp_loop, _servers, _lock
+            from tools.mcp_tool import (
+                discover_mcp_tools,
+                mcp_prefixed_tool_name,
+                register_mcp_servers,
+                _run_on_mcp_loop,
+                _servers,
+                _lock,
+            )
         except ImportError:
             return {"error": "MCP tool module not available", "ok": False}
 
         if profile is None:
             profile = _worker_profile() or "default"
+
+        if action == "mcp_portable_reload":
+            try:
+                from hermes_cli.plugins import discover_plugins, get_plugin_manager
+            except ImportError:
+                return {
+                    "error": "Portable Agent Plugins are not supported by this Hermes runtime",
+                    "ok": False,
+                }
+            return self._mcp_portable_reload(
+                profile,
+                _servers,
+                _lock,
+                _run_on_mcp_loop,
+                register_mcp_servers,
+                discover_plugins,
+                get_plugin_manager,
+            )
 
         dispatch = {
             "mcp_list":            lambda: self._mcp_list(profile, _servers, _lock),
@@ -389,6 +423,9 @@ class BridgeServer:
             "mcp_server_remove":   lambda: self._mcp_server_remove(req, profile, _servers, _lock, _run_on_mcp_loop),
             "mcp_server_test":     lambda: self._mcp_server_test(req, _servers, _lock),
             "mcp_tools_list":      lambda: self._mcp_tools_list(req, profile, _servers, _lock),
+            "mcp_app_resolve":     lambda: self._mcp_app_resolve(
+                req, profile, _servers, _lock, _run_on_mcp_loop, mcp_prefixed_tool_name
+            ),
             "mcp_reload":          lambda: self._mcp_reload(req, profile, _servers, _lock, _run_on_mcp_loop, discover_mcp_tools, register_mcp_servers),
         }
         handler = dispatch.get(action)
@@ -409,6 +446,51 @@ class BridgeServer:
         }
 
     # ───── MCP sub-handlers ─────
+
+    @staticmethod
+    def _mcp_field(value: Any, snake_name: str, camel_name: str | None = None) -> Any:
+        if isinstance(value, dict):
+            if snake_name in value:
+                return value[snake_name]
+            return value.get(camel_name) if camel_name else None
+        result = getattr(value, snake_name, None)
+        if result is None and camel_name:
+            result = getattr(value, camel_name, None)
+        return result
+
+    def _portable_mcp_server_names(self, profile: str) -> set[str]:
+        try:
+            with _profile_env(profile):
+                from hermes_cli.plugins import get_portable_mcp_server_names_nowait
+
+                return set(get_portable_mcp_server_names_nowait())
+        except Exception:
+            return set()
+
+    def _profile_mcp_server_names(self, profile: str, config: dict | None = None) -> set[str]:
+        resolved = config if isinstance(config, dict) else self._read_mcp_config(profile)
+        native = resolved.get("mcp_servers", {}) if isinstance(resolved, dict) else {}
+        names = set(native) if isinstance(native, dict) else set()
+        names.update(self._portable_mcp_server_names(profile))
+        return names
+
+    @staticmethod
+    def _mcp_app_resource_uri(meta: Any) -> str | None:
+        if not isinstance(meta, dict):
+            return None
+        ui = meta.get("ui")
+        nested = ui.get("resourceUri") if isinstance(ui, dict) else None
+        uri = nested if isinstance(nested, str) else meta.get("ui/resourceUri")
+        if not isinstance(uri, str) or not uri.startswith("ui://"):
+            return None
+        return uri
+
+    @staticmethod
+    def _is_mcp_app_mime(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        parts = [part.strip().lower() for part in value.split(";") if part.strip()]
+        return bool(parts and parts[0] == "text/html" and "profile=mcp-app" in parts[1:])
 
     def _build_server_entry(self, name: str, cfg: dict, connected: bool = False,
                             tools_count: int = 0, registered_count: int = 0,
@@ -436,7 +518,7 @@ class BridgeServer:
 
         config = self._read_mcp_config(profile)
         mcp_configs = config.get("mcp_servers", {}) or {} if config else {}
-        profile_server_names = set(mcp_configs.keys())
+        profile_server_names = self._profile_mcp_server_names(profile, config)
 
         with _lock:
             server_snapshot = list(_servers.items())
@@ -615,7 +697,7 @@ class BridgeServer:
 
         config = self._read_mcp_config(profile)
         mcp_configs = config.get("mcp_servers", {}) or {} if config else {}
-        profile_server_names = set(mcp_configs.keys())
+        profile_server_names = self._profile_mcp_server_names(profile, config)
 
         with _lock:
             server_snapshot = list(_servers.items())
@@ -648,7 +730,16 @@ class BridgeServer:
                     tools.append({
                         "name": tname,
                         "description": getattr(mcp_tool, "description", ""),
-                        "input_schema": getattr(mcp_tool, "inputSchema", {}),
+                        "input_schema": _jsonable(
+                            self._mcp_field(mcp_tool, "input_schema", "inputSchema") or {}
+                        ),
+                        "output_schema": _jsonable(
+                            self._mcp_field(mcp_tool, "output_schema", "outputSchema") or {}
+                        ),
+                        "annotations": self._mcp_json_object(
+                            self._mcp_field(mcp_tool, "annotations") or {}
+                        ),
+                        "_meta": _jsonable(self._mcp_field(mcp_tool, "meta", "_meta") or {}),
                     })
             except Exception as e:
                 results.append({"server": sname, "tools": [], "error": str(e)})
@@ -656,6 +747,132 @@ class BridgeServer:
             results.append({"server": sname, "tools": tools})
 
         return {"ok": True, "results": results}
+
+    def _mcp_app_resolve(self, req: dict, profile: str, _servers, _lock,
+                         run_on_mcp_loop, prefixed_tool_name) -> dict[str, Any]:
+        registered_name = str(req.get("tool_name") or "").strip()
+        if not registered_name:
+            return {"ok": False, "code": "mcp_app_invalid_tool", "error": "tool_name is required"}
+
+        config = self._read_mcp_config(profile)
+        allowed_servers = self._profile_mcp_server_names(profile, config)
+        with _lock:
+            snapshot = [(name, task) for name, task in _servers.items() if name in allowed_servers]
+
+        for server_name, task in snapshot:
+            for mcp_tool in getattr(task, "_tools", []):
+                raw_name = str(getattr(mcp_tool, "name", "") or "")
+                if not raw_name or prefixed_tool_name(server_name, raw_name) != registered_name:
+                    continue
+                tool_meta = _jsonable(self._mcp_field(mcp_tool, "meta", "_meta") or {})
+                resource_uri = self._mcp_app_resource_uri(tool_meta)
+                if not resource_uri:
+                    return {
+                        "ok": False,
+                        "code": "mcp_app_not_found",
+                        "error": "The MCP tool does not declare an App resource",
+                    }
+                session = getattr(task, "session", None)
+                if session is None:
+                    return {
+                        "ok": False,
+                        "code": "mcp_app_server_unavailable",
+                        "error": "The MCP server is not connected",
+                    }
+
+                async def _read_declared_resource():
+                    rpc_lock = getattr(task, "_rpc_lock", None)
+                    if rpc_lock is None:
+                        return await session.read_resource(resource_uri)
+                    async with rpc_lock:
+                        return await session.read_resource(resource_uri)
+
+                try:
+                    read_result = run_on_mcp_loop(_read_declared_resource, timeout=30)
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "code": "mcp_app_resource_error",
+                        "error": f"Failed to read the declared MCP App resource: {exc}",
+                    }
+
+                for content in self._mcp_field(read_result, "contents") or []:
+                    content_uri = str(self._mcp_field(content, "uri") or "")
+                    if content_uri != resource_uri:
+                        continue
+                    mime_type = self._mcp_field(content, "mime_type", "mimeType")
+                    text = self._mcp_field(content, "text")
+                    if not self._is_mcp_app_mime(mime_type) or not isinstance(text, str):
+                        return {
+                            "ok": False,
+                            "code": "mcp_app_invalid_resource",
+                            "error": "The declared resource is not an MCP App HTML document",
+                        }
+                    if len(text.encode("utf-8")) > self.MAX_MCP_APP_RESOURCE_BYTES:
+                        return {
+                            "ok": False,
+                            "code": "mcp_app_resource_too_large",
+                            "error": "The MCP App resource exceeds the 1 MiB limit",
+                        }
+                    return {
+                        "ok": True,
+                        "tool": {
+                            "name": registered_name,
+                            "raw_name": raw_name,
+                            "server": server_name,
+                            "description": str(getattr(mcp_tool, "description", "") or ""),
+                            "input_schema": _jsonable(
+                                self._mcp_field(mcp_tool, "input_schema", "inputSchema") or {}
+                            ),
+                            "output_schema": _jsonable(
+                                self._mcp_field(mcp_tool, "output_schema", "outputSchema") or {}
+                            ),
+                            "annotations": self._mcp_json_object(
+                                self._mcp_field(mcp_tool, "annotations") or {}
+                            ),
+                            "_meta": tool_meta,
+                        },
+                        "resource": {
+                            "uri": resource_uri,
+                            "mimeType": str(mime_type),
+                            "text": text,
+                            "_meta": _jsonable(self._mcp_field(content, "meta", "_meta") or {}),
+                        },
+                    }
+                return {
+                    "ok": False,
+                    "code": "mcp_app_invalid_resource",
+                    "error": "The MCP server did not return its declared App resource",
+                }
+
+        return {
+            "ok": False,
+            "code": "mcp_app_not_found",
+            "error": "No MCP App descriptor was found for this tool",
+        }
+
+    def _mcp_portable_reload(self, profile: str, _servers, _lock, run_on_mcp_loop,
+                             register_mcp_servers, discover_plugins, get_plugin_manager) -> dict[str, Any]:
+        with _profile_env(profile):
+            manager = get_plugin_manager()
+            old_names = set(manager.get_portable_mcp_servers())
+            discover_plugins(force=True)
+            configs = get_plugin_manager().get_portable_mcp_servers()
+
+        new_names = set(configs)
+        with _lock:
+            connected_names = set(_servers)
+        replace_names = sorted((old_names | new_names) & connected_names)
+        stopped = self._shutdown_mcp_servers(
+            replace_names, _servers, _lock, run_on_mcp_loop
+        )
+        tools = register_mcp_servers(configs) if configs else []
+        return {
+            "ok": True,
+            "stopped": stopped,
+            "servers": sorted(new_names),
+            "tools": list(tools),
+        }
 
     def _mcp_reload(self, req: dict, profile: str, _servers, _lock, run_on_mcp_loop,
                     discover_mcp_tools, register_mcp_servers) -> dict[str, Any]:

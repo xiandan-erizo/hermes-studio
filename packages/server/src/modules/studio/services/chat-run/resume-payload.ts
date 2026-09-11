@@ -5,6 +5,9 @@ import type { SessionMessage } from './types'
 export const RESUME_TOOL_RESULT_DISPLAY_LIMIT = 1_000
 export const RESUME_MESSAGE_PAGE_LIMIT = 150
 
+// MCP Apps consume the original result as data. Never apply the text preview's
+// per-field trimming to a result that fits within this separate transport bound.
+const MCP_STRUCTURED_RESULT_MAX_BYTES = 256 * 1024
 const JSON_STRING_DISPLAY_LIMIT = 200
 const JSON_MAX_DEPTH = 6
 const JSON_MAX_NODES = 1_000
@@ -133,10 +136,36 @@ function looksLikeUnifiedDiff(content: string): boolean {
   return hasFileHeader && (hasTargetHeader || hasHunk)
 }
 
-function truncateToolResult(content: string): string {
+function hasStructuredMcpResult(content: string): boolean {
+  const queue: Array<{ value: unknown; depth: number }> = [{ value: content, depth: 0 }]
+  for (let index = 0; index < queue.length && index < 32; index += 1) {
+    let { value, depth } = queue[index]
+    if (depth > 6) continue
+    if (typeof value === 'string') {
+      try { value = JSON.parse(value) } catch { continue }
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const result = value as Record<string, unknown>
+    if (result.structuredContent && typeof result.structuredContent === 'object' && !Array.isArray(result.structuredContent)) {
+      return true
+    }
+    for (const key of ['output', 'result', 'data']) {
+      if (result[key] !== undefined) queue.push({ value: result[key], depth: depth + 1 })
+    }
+  }
+  return false
+}
+
+function truncateToolResult(content: string, toolName?: string): string {
   if (content.length <= RESUME_TOOL_RESULT_DISPLAY_LIMIT || looksLikeUnifiedDiff(content)) return content
 
-  if (/^[\[{]/.test(content.trim())) {
+  const isMcp = toolName?.startsWith('mcp__') === true
+  const oversizedMcp = isMcp && Buffer.byteLength(content, 'utf8') > MCP_STRUCTURED_RESULT_MAX_BYTES
+  if (isMcp && !oversizedMcp && hasStructuredMcpResult(content)) return content
+
+  // Oversized MCP results fall back to plain text. Returning a partially cut
+  // structuredContent object could otherwise render an incomplete App as valid.
+  if (!oversizedMcp && /^[\[{]/.test(content.trim())) {
     try {
       return JSON.stringify(truncateJsonValue(JSON.parse(content)), null, 2)
     } catch {
@@ -155,7 +184,7 @@ function truncateMessageField(
 ): boolean {
   const content = target[field]
   if (typeof content !== 'string' || content.length <= RESUME_TOOL_RESULT_DISPLAY_LIMIT) return false
-  const truncated = truncateToolResult(content)
+  const truncated = truncateToolResult(content, target.tool_name || undefined)
   if (truncated === content) return false
   target[field] = truncated
   target[`${field}_truncated`] = true
@@ -190,8 +219,8 @@ export function buildOutboundToolMessage<T extends OutboundToolMessage>(
  * Build the display-only message page emitted by `resume`.
  *
  * The session state and persisted history intentionally retain complete tool
- * results. Only cloned outbound tool rows are bounded to the same 1000-character
- * display threshold previously enforced by the Studio client.
+ * results. Ordinary outbound tool rows use the 1000-character display threshold;
+ * structured MCP results use a separate byte bound to preserve App data intact.
  */
 export function buildResumeMessages(messages: SessionMessage[]): SessionMessage[] {
   return messages.map(message => buildOutboundToolMessage(message as ResumeMessage) as SessionMessage)
@@ -270,7 +299,8 @@ export function buildOutboundRunEvent(event: string, payload: any): any {
   const outbound = { ...payload }
   let changed = false
   if (typeof outbound.output === 'string' && outbound.output.length > RESUME_TOOL_RESULT_DISPLAY_LIMIT) {
-    const output = truncateToolResult(outbound.output)
+    const toolName = outbound.tool || outbound.name || outbound.tool_name
+    const output = truncateToolResult(outbound.output, typeof toolName === 'string' ? toolName : undefined)
     if (output !== outbound.output) {
       outbound.output = output
       outbound.output_truncated = true

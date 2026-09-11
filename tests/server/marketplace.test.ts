@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdir, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -55,6 +55,37 @@ Body text here.
     return repo
   }
 
+  async function writePortableFixtureRepo(): Promise<string> {
+    const repo = await writeFixtureRepo()
+    const pluginDir = join(repo, 'plugins', 'demo-tool')
+    await writeFile(
+      join(pluginDir, 'plugin.json'),
+      JSON.stringify({
+        $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+        name: 'demo-tool',
+        version: '1.2.3',
+        description: 'Portable demo plugin.',
+        author: { name: 'OpenResources' },
+      }),
+      'utf-8',
+    )
+    await writeFile(
+      join(pluginDir, 'mcp.json'),
+      JSON.stringify({
+        $schema: 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json',
+        mcpServers: {
+          view: { type: 'stdio', command: 'node', args: ['${PLUGIN_ROOT}/mcp/server.cjs'] },
+        },
+      }),
+      'utf-8',
+    )
+    await mkdir(join(pluginDir, 'mcp'), { recursive: true })
+    await mkdir(join(pluginDir, 'assets'), { recursive: true })
+    await writeFile(join(pluginDir, 'mcp', 'server.cjs'), 'process.stdin.resume()\n', 'utf-8')
+    await writeFile(join(pluginDir, 'assets', 'view.html'), '<html>portable</html>\n', 'utf-8')
+    return repo
+  }
+
   describe('frontmatter parsing', () => {
     it('parses yaml frontmatter and splits the body', async () => {
       const { parseFrontmatter } = await import('../../packages/server/src/modules/hermes/services/marketplace/repo-scanner')
@@ -84,6 +115,7 @@ Body text here.
         author: 'OpenResources',
       })
       expect(plugins[0].interface?.displayName).toBe('Demo Tool')
+      expect(plugins[0].portable).toBe(false)
       expect(plugins[0].skills).toEqual([
         {
           name: 'demo-tool',
@@ -91,6 +123,19 @@ Body text here.
           allowedTools: ['Bash(demo:*)'],
         },
       ])
+    })
+
+    it('uses a portable root manifest as identity and the Codex manifest as its interface overlay', async () => {
+      const repo = await writePortableFixtureRepo()
+      const { scanMarketplaceRepo } = await import('../../packages/server/src/modules/hermes/services/marketplace/repo-scanner')
+      const [plugin] = await scanMarketplaceRepo(repo)
+      expect(plugin).toMatchObject({
+        name: 'demo-tool',
+        version: '1.2.3',
+        description: 'Portable demo plugin.',
+        portable: true,
+        interface: { displayName: 'Demo Tool' },
+      })
     })
 
     it('loads plugin detail with SKILL.md bodies and file lists', async () => {
@@ -189,6 +234,88 @@ Body text here.
       await expect(
         installMarketplaceSkill({ source: sourceB, repoDir: repo, skillsDir, plugin: 'demo-tool', skill: 'demo-tool' }),
       ).rejects.toThrow(/installed from source "a"/)
+    })
+
+    it('installs, updates, and uninstalls a complete portable plugin while preserving plugin data', async () => {
+      const repo = await writePortableFixtureRepo()
+      const profileDir = join(workDir, 'portable-profile')
+      const skillsDir = join(profileDir, 'skills')
+      const pluginsDir = join(profileDir, 'plugins')
+      const dataSentinel = join(profileDir, 'plugin-data', 'demo-tool', 'state.json')
+      await mkdir(join(profileDir, 'plugin-data', 'demo-tool'), { recursive: true })
+      await writeFile(dataSentinel, '{"kept":true}\n', 'utf-8')
+      await writeFile(join(profileDir, 'config.yaml'), 'plugins:\n  enabled: []\n  disabled:\n    - demo-tool\n', 'utf-8')
+      const {
+        installMarketplacePlugin,
+        listMarketplaceInstalled,
+        uninstallMarketplaceSkill,
+        readMarketplaceLock,
+      } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      const installed = await installMarketplacePlugin({
+        source,
+        repoDir: repo,
+        profileDir,
+        plugin: 'demo-tool',
+        version: '1.2.3',
+      })
+      expect(installed).toMatchObject({ plugin: 'demo-tool', skill: 'demo-tool', installKind: 'plugin', updated: false })
+      expect(await readFile(join(pluginsDir, 'demo-tool', 'plugin.json'), 'utf-8')).toContain('agent-plugins.org')
+      expect(await readFile(join(pluginsDir, 'demo-tool', 'mcp', 'server.cjs'), 'utf-8')).toContain('stdin')
+      expect(await readFile(join(pluginsDir, 'demo-tool', 'assets', 'view.html'), 'utf-8')).toContain('portable')
+      const enabledConfig = await readFile(join(profileDir, 'config.yaml'), 'utf-8')
+      expect(enabledConfig).toMatch(/enabled:[\s\S]*demo-tool/)
+      expect(enabledConfig).not.toMatch(/disabled:[\s\S]*demo-tool/)
+      expect((await readMarketplaceLock(skillsDir))['demo-tool']).toMatchObject({ installKind: 'plugin' })
+
+      await writeFile(join(pluginsDir, 'demo-tool', 'assets', 'view.html'), '<html>local edit</html>\n', 'utf-8')
+      expect((await listMarketplaceInstalled(skillsDir))[0]).toMatchObject({
+        plugin: 'demo-tool', installKind: 'plugin', modified: true,
+      })
+      const updated = await installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool', version: '1.3.0' })
+      expect(updated.updated).toBe(true)
+      expect(await readFile(join(pluginsDir, 'demo-tool', 'assets', 'view.html'), 'utf-8')).toContain('portable')
+
+      await uninstallMarketplaceSkill(skillsDir, 'demo-tool')
+      await expect(stat(join(pluginsDir, 'demo-tool'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(dataSentinel, 'utf-8')).toContain('kept')
+      const disabledConfig = await readFile(join(profileDir, 'config.yaml'), 'utf-8')
+      expect(disabledConfig).not.toMatch(/enabled:[\s\S]*demo-tool/)
+      expect(disabledConfig).not.toMatch(/disabled:[\s\S]*demo-tool/)
+    })
+
+    it('migrates a same-source marketplace skill into its portable plugin package', async () => {
+      const repo = await writePortableFixtureRepo()
+      const profileDir = join(workDir, 'migration-profile')
+      const skillsDir = join(profileDir, 'skills')
+      await mkdir(profileDir, { recursive: true })
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const { installMarketplaceSkill, installMarketplacePlugin, listMarketplaceInstalled } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      await installMarketplaceSkill({ source, repoDir: repo, skillsDir, plugin: 'demo-tool', skill: 'demo-tool' })
+      await installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool', version: '1.2.3' })
+
+      await expect(stat(join(skillsDir, 'demo-tool'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(join(profileDir, 'plugins', 'demo-tool', 'mcp.json'), 'utf-8')).toContain('mcpServers')
+      expect(await listMarketplaceInstalled(skillsDir)).toMatchObject([
+        { plugin: 'demo-tool', installKind: 'plugin' },
+      ])
+    })
+
+    it('refuses to overwrite an unmanaged portable plugin directory', async () => {
+      const repo = await writePortableFixtureRepo()
+      const profileDir = join(workDir, 'conflict-profile')
+      await mkdir(join(profileDir, 'plugins', 'demo-tool'), { recursive: true })
+      await writeFile(join(profileDir, 'plugins', 'demo-tool', 'plugin.json'), '{"mine":true}\n', 'utf-8')
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const { installMarketplacePlugin, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      await expect(installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool' }))
+        .rejects.toThrow(MarketplaceInstallError)
+      expect(await readFile(join(profileDir, 'plugins', 'demo-tool', 'plugin.json'), 'utf-8')).toContain('mine')
     })
   })
 

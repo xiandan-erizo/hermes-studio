@@ -26,6 +26,29 @@ export interface McpToolEntry {
   name: string
   description: string
   input_schema: Record<string, unknown>
+  output_schema?: Record<string, unknown>
+  annotations?: Record<string, unknown>
+  _meta?: Record<string, unknown>
+}
+
+export interface McpAppResolveResponse extends McpActionResult {
+  code?: string
+  tool?: {
+    name: string
+    raw_name: string
+    server: string
+    description: string
+    input_schema: Record<string, unknown>
+    output_schema?: Record<string, unknown>
+    annotations?: Record<string, unknown>
+    _meta: Record<string, unknown>
+  }
+  resource?: {
+    uri: string
+    mimeType: string
+    text: string
+    _meta: Record<string, unknown>
+  }
 }
 
 export interface McpActionResult {
@@ -64,4 +87,5 @@ export type McpActionResponse =
   | McpTestResponse
   | McpToolsListResponse
   | McpReloadResponse
+  | McpAppResolveResponse
   | McpActionResult

@@ -2,6 +2,9 @@ import Router from '@koa/router'
 import * as ctrl from '../controllers/mcp'
 
 export const mcpRoutes = new Router()
+export const mcpAppRoutes = new Router()
+
+mcpAppRoutes.post('/api/hermes/mcp/apps/resolve', ctrl.resolveApp)
 
 mcpRoutes.get('/api/hermes/mcp/servers', ctrl.listServers)
 mcpRoutes.post('/api/hermes/mcp/servers', ctrl.addServer)

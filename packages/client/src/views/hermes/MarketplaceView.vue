@@ -25,6 +25,7 @@ import {
   fetchMarketplacePlugins,
   fetchMarketplaceSources,
   installMarketplaceSkill,
+  installMarketplacePlugin,
   refreshMarketplaceSource,
   uninstallMarketplaceSkill,
   type MarketplaceInstalledSkill,
@@ -32,6 +33,10 @@ import {
   type MarketplacePluginDetail,
   type MarketplaceSource,
 } from '@/api/hermes/marketplace'
+import {
+  findMarketplacePluginInstall,
+  findMarketplaceSkillInstall,
+} from '@/utils/hermes/marketplace-install-state'
 
 const { t } = useI18n()
 const message = useMessage()
@@ -56,12 +61,6 @@ const creatingSource = ref(false)
 const refreshing = ref(false)
 
 const selectedSource = computed(() => sources.value.find(s => s.id === selectedSourceId.value) || null)
-
-const installedBySkill = computed(() => {
-  const map = new Map<string, MarketplaceInstalledSkill>()
-  for (const entry of installed.value) map.set(entry.skill, entry)
-  return map
-})
 
 const sourceOptions = computed(() => sources.value.map(source => ({
   label: source.name,
@@ -90,6 +89,14 @@ const detailLoading = ref(false)
 const detailError = ref('')
 const installingSkill = ref('')
 const uninstallingSkill = ref('')
+
+function pluginInstall(pluginName: string): MarketplaceInstalledSkill | null {
+  return findMarketplacePluginInstall(pluginName, installed.value)
+}
+
+function skillInstall(plugin: MarketplacePlugin, skillName: string): MarketplaceInstalledSkill | null {
+  return findMarketplaceSkillInstall(plugin.name, skillName, plugin.portable, installed.value)
+}
 
 function formatTime(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === '') return ''
@@ -227,6 +234,20 @@ async function handleInstall(pluginName: string, skillName: string): Promise<voi
   }
 }
 
+async function handlePluginInstall(pluginName: string): Promise<void> {
+  if (!selectedSourceId.value) return
+  installingSkill.value = `plugin:${pluginName}`
+  try {
+    await installMarketplacePlugin(selectedSourceId.value, pluginName)
+    await loadInstalled()
+    message.success(t('marketplace.installSuccess', { name: pluginName }))
+  } catch (err: any) {
+    message.error(String(err?.message || err))
+  } finally {
+    installingSkill.value = ''
+  }
+}
+
 function confirmUninstall(skillName: string): void {
   dialog.warning({
     title: t('marketplace.uninstall'),
@@ -343,7 +364,7 @@ onMounted(async () => {
           <div class="plugin-card-head">
             <span class="plugin-title">{{ plugin.interface?.displayName || plugin.name }}</span>
             <NTag v-if="plugin.version" size="tiny" type="info">{{ plugin.version }}</NTag>
-            <NTag v-if="plugin.skills.some(s => installedBySkill.has(s.name))" size="tiny" type="success">
+            <NTag v-if="plugin.portable ? pluginInstall(plugin.name) : plugin.skills.some(s => skillInstall(plugin, s.name))" size="tiny" type="success">
               {{ t('marketplace.installed') }}
             </NTag>
           </div>
@@ -374,6 +395,35 @@ onMounted(async () => {
                 {{ detailPlugin.interface.category }}
               </NTag>
               <span class="text-muted detail-name">{{ detailPlugin.name }}</span>
+              <div v-if="detailPlugin.portable" class="portable-plugin-actions">
+                <template v-if="pluginInstall(detailPlugin.name)">
+                  <span class="text-muted">
+                    {{ t('marketplace.installedAt', { time: formatTime(pluginInstall(detailPlugin.name)!.updatedAt) }) }}
+                  </span>
+                  <NTag v-if="pluginInstall(detailPlugin.name)!.modified" size="tiny" type="warning">
+                    {{ t('marketplace.modified') }}
+                  </NTag>
+                  <NButton
+                    size="tiny"
+                    quaternary
+                    type="error"
+                    :loading="uninstallingSkill === detailPlugin.name"
+                    @click="confirmUninstall(detailPlugin.name)"
+                  >
+                    {{ t('marketplace.uninstall') }}
+                  </NButton>
+                </template>
+                <NButton
+                  v-else
+                  size="tiny"
+                  type="primary"
+                  ghost
+                  :loading="installingSkill === `plugin:${detailPlugin.name}`"
+                  @click="handlePluginInstall(detailPlugin.name)"
+                >
+                  {{ t('marketplace.install') }}
+                </NButton>
+              </div>
             </div>
             <p class="detail-desc">
               {{ detailPlugin.interface?.longDescription || detailPlugin.description }}
@@ -393,13 +443,13 @@ onMounted(async () => {
               <div class="skill-block-head">
                 <div class="skill-block-title">
                   <span class="skill-name">{{ skill.name }}</span>
-                  <span v-if="installedBySkill.has(skill.name)" class="text-muted">
-                    {{ t('marketplace.installedAt', { time: formatTime(installedBySkill.get(skill.name)!.updatedAt) }) }}
+                  <span v-if="!detailPlugin.portable && skillInstall(detailPlugin, skill.name)" class="text-muted">
+                    {{ t('marketplace.installedAt', { time: formatTime(skillInstall(detailPlugin, skill.name)!.updatedAt) }) }}
                   </span>
                 </div>
-                <div class="skill-actions">
-                  <template v-if="installedBySkill.has(skill.name)">
-                    <NTag v-if="installedBySkill.get(skill.name)!.modified" size="tiny" type="warning">
+                <div v-if="!detailPlugin.portable" class="skill-actions">
+                  <template v-if="skillInstall(detailPlugin, skill.name)">
+                    <NTag v-if="skillInstall(detailPlugin, skill.name)!.modified" size="tiny" type="warning">
                       {{ t('marketplace.modified') }}
                     </NTag>
                     <NButton
@@ -590,6 +640,13 @@ onMounted(async () => {
 
 .detail-name {
   font-family: monospace;
+}
+
+.portable-plugin-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
 }
 
 .detail-desc {

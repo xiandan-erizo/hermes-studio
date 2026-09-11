@@ -56,6 +56,15 @@ export async function bridgeMcpAction(
     case 'mcp_tools_list':
       raw = await client.mcpTools(payload.server as string | undefined, profile, payload.raw as boolean | undefined)
       break
+    case 'mcp_app_resolve': {
+      const toolName = String(payload.toolName || '')
+      if (!toolName) throw new Error('toolName is required')
+      raw = await client.mcpAppResolve(toolName, profile)
+      break
+    }
+    case 'mcp_portable_reload':
+      raw = await client.mcpPortableReload(profile)
+      break
     case 'mcp_reload':
       raw = await client.mcpReload(payload.server as string | undefined, profile)
       break

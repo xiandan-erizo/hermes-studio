@@ -5,6 +5,7 @@ import { inferCodingAgentApiMode, normalizeCodingAgentApiMode, type ChatCodingAg
 import { getDownloadUrl } from '@/api/studio/download'
 import type { ProviderApiMode } from '@/api/studio/provider-api-mode'
 import { defineStore } from 'pinia'
+import type { McpAppInvocation } from '@/utils/hermes/mcp-app-result'
 import { ref, computed } from 'vue'
 import { useAppStore } from './app'
 import { useProfilesStore } from './profiles'
@@ -90,7 +91,8 @@ export interface Message {
   // 不含 <think> 包裹标签；内容自身可以为多段纯文本。
   reasoning?: string
   queued?: boolean
-  systemType?: 'command' | 'error' | 'fork-divider' | 'tool-run'
+  systemType?: 'command' | 'error' | 'fork-divider' | 'tool-run' | 'mcp-app'
+  mcpApp?: McpAppInvocation
   commandAction?: string
   commandData?: Record<string, unknown>
   finishReason?: string | null

@@ -28,9 +28,42 @@ export interface McpToolsResponse {
       name: string
       description: string
       input_schema: Record<string, unknown>
+      output_schema?: Record<string, unknown>
+      annotations?: Record<string, unknown>
+      _meta?: Record<string, unknown>
     }>
   }>
   error?: string
+}
+
+export interface McpAppResolveResponse {
+  ok: boolean
+  code?: string
+  error?: string
+  tool?: {
+    name: string
+    raw_name: string
+    server: string
+    description: string
+    input_schema: Record<string, unknown>
+    output_schema?: Record<string, unknown>
+    annotations?: Record<string, unknown>
+    _meta: Record<string, unknown>
+  }
+  resource?: {
+    uri: string
+    mimeType: string
+    text: string
+    _meta: Record<string, unknown>
+  }
+}
+
+export async function resolveMcpApp(toolName: string): Promise<McpAppResolveResponse> {
+  return request<McpAppResolveResponse>('/api/hermes/mcp/apps/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolName }),
+  })
 }
 
 export interface McpServerConfig {
