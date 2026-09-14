@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   classifyServerFile,
+  checkServerModuleBoundaries,
   collectModuleSpecifiers,
   forbiddenDomainDependency,
   legacyAppAliasFailure,
@@ -9,6 +10,10 @@ import {
 } from '../../scripts/server-module-boundaries.mjs'
 
 describe('server module boundary harness', () => {
+  it('keeps marketplace persistence and external identities within the Studio boundary', async () => {
+    const failures = await checkServerModuleBoundaries()
+    expect(failures.filter(failure => /marketplace|external-identities/.test(failure))).toEqual([])
+  })
   it('recognizes only the planned module roots', () => {
     expect(classifyServerFile('modules/hermes/services/kanban/service.ts')).toMatchObject({
       architecture: 'target',

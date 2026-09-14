@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'crypto'
 import { join, resolve } from 'path'
 import { isPathWithin } from '../runtime/path'
 import { resolvePluginSkillDir, resolvePortablePluginDir } from './repo-scanner'
-import type { MarketplaceSourceRecord } from './sources-store'
+import type { MarketplaceSourceRecord } from '../../../studio/public/marketplace'
 import { safeFileStore } from '../../../studio/public/safe-file-store'
 
 /**

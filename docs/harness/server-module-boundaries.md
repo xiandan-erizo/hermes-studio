@@ -332,6 +332,8 @@ registry. Studio orchestration never imports a concrete agent module.
 | Pets/Petdex and aggregate logs | Studio | Stored or presented as Studio product state. |
 | Common config, credentials, provider contracts, voice, run/session/usage helpers | Studio | Shared capabilities exposed through `studio/public` or `studio/contracts`. |
 | Studio SQLite tables and repositories | Studio | Application state owned by the Web UI. |
+| Marketplace source persistence | Studio | Source records live in the Studio database; Hermes marketplace consumers use `studio/public/marketplace`. Catalog scanning and plugin installation remain Hermes services. |
+| External identity mappings and candidates | Studio | Controllers delegate to the identity service; history candidates come through `studio/public/session-agent-runtime`. |
 | Hermes profiles, bridge, gateway, skills, plugins, memory, terminal, cron | Hermes | Direct Hermes Agent behavior or state. |
 | Journey | Hermes | Invokes Hermes and reads a Hermes profile. |
 | Kanban | Hermes | Uses `hermes kanban`, Hermes profiles, and Hermes history. It is not a common scheduler. |

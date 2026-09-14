@@ -22,7 +22,7 @@ vi.mock('../../packages/server/src/modules/hermes/services/profiles/profile', ()
   getProfileDir: (profile: string) => `/profiles/${profile}`,
 }))
 
-vi.mock('../../packages/server/src/modules/hermes/services/marketplace/sources-store', () => ({
+vi.mock('../../packages/server/src/modules/studio/public/marketplace', () => ({
   findMarketplaceSource: () => source,
   listMarketplaceSources: () => [source],
   recordSourceSync: vi.fn(),

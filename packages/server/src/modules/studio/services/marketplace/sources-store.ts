@@ -1,5 +1,5 @@
-import { getDb } from '../../../studio/infrastructure/database'
-import { MARKETPLACE_SOURCES_TABLE } from '../../../studio/infrastructure/database/schemas'
+import { getDb } from '../../infrastructure/database'
+import { MARKETPLACE_SOURCES_TABLE } from '../../infrastructure/database/schemas'
 
 /**
  * Configured marketplace source registry. Stored in the Studio database

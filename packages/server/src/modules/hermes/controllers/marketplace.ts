@@ -10,7 +10,7 @@ import {
   MarketplaceSourceConflictError,
   MarketplaceSourceValidationError,
   type MarketplaceSourceRecord,
-} from '../services/marketplace/sources-store'
+} from '../../studio/public/marketplace'
 import {
   cachedCommit,
   marketplaceCacheDir,

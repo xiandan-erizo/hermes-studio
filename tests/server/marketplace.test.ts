@@ -430,7 +430,7 @@ Body text here.
     })
 
     it('crud + sync bookkeeping', async () => {
-      const store = await import('../../packages/server/src/modules/hermes/services/marketplace/sources-store')
+      const store = await import('../../packages/server/src/modules/studio/public/marketplace')
       const created = store.createMarketplaceSource({ name: 'hose-skills', url: 'git@git.ekuaibao.com:ai-learning/hose-skills.git' })
       expect(created).toMatchObject({ name: 'hose-skills', enabled: 1 })
       expect(store.createMarketplaceSource({ name: 'dup', url: 'git@git.ekuaibao.com:ai-learning/hose-skills.git' })).toEqual({ conflict: true })
