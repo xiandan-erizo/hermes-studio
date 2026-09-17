@@ -1,4 +1,24 @@
 import { request } from '../client'
+import type { CallToolResult } from '@modelcontextprotocol/client'
+
+export interface McpAppBinding {
+  sessionId: string
+  toolCallId: string
+  toolName: string
+  profile: string
+}
+
+export function callMcpAppTool(binding: McpAppBinding, params: { name: string; arguments?: Record<string, unknown> }): Promise<CallToolResult> {
+  return request('/api/hermes/mcp/apps/call-tool', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...binding, params }),
+  })
+}
+
+export function updateMcpAppModelContext(binding: McpAppBinding, params: { content?: unknown[]; structuredContent?: Record<string, unknown> }): Promise<Record<string, never>> {
+  return request('/api/hermes/mcp/apps/model-context', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...binding, params }),
+  })
+}
 
 export interface McpServerInfo {
   name: string

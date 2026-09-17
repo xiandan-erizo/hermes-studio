@@ -3,7 +3,7 @@
  * Uses the same ensureTable/getDb pattern as usage-store.ts.
  */
 import { isSqliteAvailable, getDb } from '../infrastructure/database'
-import { COMPRESSION_SNAPSHOT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE } from '../infrastructure/database/schemas'
+import { COMPRESSION_SNAPSHOT_TABLE, MCP_APP_CONTEXT_TABLE, SESSIONS_TABLE, MESSAGES_TABLE } from '../infrastructure/database/schemas'
 import { normalizeMessageContentForStorageRole } from './message-content'
 import { copyCompressionSnapshot } from './compression-snapshot'
 import { recordSkillUsageMessage } from './skill-usage-store'
@@ -500,6 +500,7 @@ export function clearSessionMessages(id: string): number {
   try {
     const result = db.prepare(`DELETE FROM ${MESSAGES_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(`DELETE FROM ${COMPRESSION_SNAPSHOT_TABLE} WHERE session_id = ?`).run(id)
+    db.prepare(`DELETE FROM ${MCP_APP_CONTEXT_TABLE} WHERE session_id = ?`).run(id)
     db.prepare(
       `UPDATE ${SESSIONS_TABLE}
        SET history_revision = history_revision + 1,

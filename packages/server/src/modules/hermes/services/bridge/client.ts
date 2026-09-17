@@ -833,6 +833,10 @@ export class AgentBridgeClient {
     })
   }
 
+  mcpAppCallTool(toolName: string, name: string, args: Record<string, unknown>, profile: string): Promise<{ ok: boolean; result: Record<string, unknown> }> {
+    return this.request<AgentBridgeResponse & { result: Record<string, unknown> }>({ action: 'mcp_app_call_tool', tool_name: toolName, name, arguments: args, profile })
+  }
+
   mcpPortableReload(profile?: string): Promise<McpActionResponse> {
     return this.request({
       action: 'mcp_portable_reload',

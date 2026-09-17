@@ -13,6 +13,7 @@ from typing import Any
 from bridge_runtime import _install_stop_signal_handlers, _jsonable
 from bridge_transport import (
     WorkerProcess,
+    WorkerResponseError,
     _make_listen_socket,
     _read_json_request,
     _worker_endpoint,
@@ -147,8 +148,10 @@ class BridgeBroker:
             resp = worker.request(forwarded, self._worker_request_timeout(req))
             self._record_response_routes(profile, key, resp)
             return resp
+        except WorkerResponseError as e:
+            return e.response
         except RuntimeError as e:
-            # Worker returned ok=false or connection error — return error response
+            # Transport failures have no structured worker response.
             return {"ok": False, "error": str(e)}
 
     def _worker_request_timeout(self, req: dict[str, Any]) -> float:
@@ -188,6 +191,8 @@ class BridgeBroker:
                 self._record_response_routes(profile, key or profile, resp)
             resp.setdefault("loaded", True)
             return resp
+        except WorkerResponseError as e:
+            return e.response
         except RuntimeError as e:
             return {"ok": False, "error": str(e)}
 

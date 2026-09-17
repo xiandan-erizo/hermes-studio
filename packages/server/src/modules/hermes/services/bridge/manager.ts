@@ -3,6 +3,7 @@ import { existsSync } from 'fs'
 import { createConnection, createServer } from 'net'
 import { isAbsolute, join, resolve } from 'path'
 import { logger } from '../../../studio/public/logging'
+import { config } from '../../../studio/public/config'
 import { resolveHermesInstallationEnvironment } from '../runtime/installation'
 import { detectHermesHome, getHermesBin } from '../runtime/path'
 import { AgentBridgeClient, DEFAULT_AGENT_BRIDGE_ENDPOINT } from './client'
@@ -97,6 +98,8 @@ export function buildAgentBridgeProcessEnv(endpoint: string, hermesHome: string 
     ...process.env,
     HERMES_AGENT_BRIDGE_ENDPOINT: endpoint,
     HERMES_HOME: hermesHome,
+    HERMES_WEB_UI_URL: `http://127.0.0.1:${config.port}`,
+    HERMES_WEB_UI_HOME: config.appHome,
     HERMES_OPENROUTER_APP_REFERER: process.env.HERMES_OPENROUTER_APP_REFERER || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_REFERER,
     HERMES_OPENROUTER_APP_TITLE: process.env.HERMES_OPENROUTER_APP_TITLE || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_TITLE,
     HERMES_OPENROUTER_APP_CATEGORIES: process.env.HERMES_OPENROUTER_APP_CATEGORIES || OPENROUTER_WEB_UI_ATTRIBUTION_ENV.HERMES_OPENROUTER_APP_CATEGORIES,

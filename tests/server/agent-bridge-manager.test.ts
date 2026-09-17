@@ -186,12 +186,16 @@ describe('agent bridge manager command resolution', () => {
   })
 
   it('injects Web UI OpenRouter attribution into the bridge process env by default', async () => {
+    process.env.HERMES_WEB_UI_HOME = tempDir
+    process.env.PORT = '8648'
     const { buildAgentBridgeProcessEnv } = await import('../../packages/server/src/modules/hermes/services/bridge/manager')
     const env = buildAgentBridgeProcessEnv('ipc:///tmp/test.sock', '/tmp/hermes-home', '/tmp/hermes-agent')
 
     expect(env.HERMES_OPENROUTER_APP_REFERER).toBe('https://hermes-studio.ai')
     expect(env.HERMES_OPENROUTER_APP_TITLE).toBe('Hermes Studio')
     expect(env.HERMES_OPENROUTER_APP_CATEGORIES).toBe('cli-agent,personal-agent')
+    expect(env.HERMES_WEB_UI_URL).toBe('http://127.0.0.1:8648')
+    expect(env.HERMES_WEB_UI_HOME).toBe(tempDir)
   })
 
   it('keeps explicit OpenRouter attribution env values when starting the bridge', async () => {

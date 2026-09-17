@@ -180,6 +180,16 @@ export const MESSAGES_INDEX = 'CREATE INDEX IF NOT EXISTS idx_messages_session_i
 
 export const SKILL_USAGE_EVENTS_TABLE = 'skill_usage_events'
 
+export const MCP_APP_CONTEXT_TABLE = 'mcp_app_context'
+export const MCP_APP_CONTEXT_SCHEMA: Record<string, string> = {
+  id: 'TEXT PRIMARY KEY',
+  session_id: 'TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE',
+  profile: 'TEXT NOT NULL',
+  tool_name: 'TEXT NOT NULL',
+  context_json: 'TEXT NOT NULL',
+  updated_at: 'INTEGER NOT NULL',
+}
+
 export const SKILL_USAGE_EVENTS_SCHEMA: Record<string, string> = {
   id: 'INTEGER PRIMARY KEY AUTOINCREMENT',
   source: "TEXT NOT NULL DEFAULT 'studio'",
@@ -1625,6 +1635,7 @@ export function initAllHermesTables(): void {
       indexes: SKILL_USAGE_EVENTS_INDEXES,
     })
     syncTable(SKILL_USAGE_SYNC_TABLE, SKILL_USAGE_SYNC_SCHEMA, { primaryKey: 'source' })
+    syncTable(MCP_APP_CONTEXT_TABLE, MCP_APP_CONTEXT_SCHEMA)
     syncTable(CHAT_WEBHOOK_ENDPOINTS_TABLE, CHAT_WEBHOOK_ENDPOINTS_SCHEMA, {
       indexes: CHAT_WEBHOOK_ENDPOINTS_INDEXES,
     })

@@ -51,6 +51,7 @@ import { buildOutboundRunEvent } from './resume-payload'
 import { writeModelRunSessionToken } from './model-run-prompt'
 import type { AuthenticatedUser } from '../../public/auth'
 import { ensureHermesRunWorkspace } from './workspace'
+import { mcpAppContextPrompt } from '../../repositories/mcp-app-context-store'
 import { observeRunChatPetEvent } from '../../public/pet-events'
 import { completeWorkspaceRunCheckpoint, startWorkspaceRunCheckpoint } from './workspace-diff-tracker'
 
@@ -523,6 +524,7 @@ export async function handleBridgeRun(
   if (!callbackContext?.instructions) {
     fullInstructions = `\n${runPrompt}\n${fullInstructions}`
   }
+  const appContext = callbackContext ? '' : mcpAppContextPrompt(session_id, profile)
 
   const runMarker = `cli_run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   const now = Math.floor(Date.now() / 1000)
@@ -728,9 +730,14 @@ export async function handleBridgeRun(
   let backgroundNotificationAccepted = false
 
   try {
-    const bridgeInput = isContentBlockArray(input)
-      ? await convertContentBlocksForAgent(input)
-      : input
+    const inputWithAppContext: string | ContentBlock[] = !appContext
+      ? input
+      : isContentBlockArray(input)
+        ? [...input, { type: 'text', text: appContext }]
+        : `${appContext}\nCurrent user message:\n${input}`
+    const bridgeInput = isContentBlockArray(inputWithAppContext)
+      ? await convertContentBlocksForAgent(inputWithAppContext)
+      : inputWithAppContext
     const runMetadata: BridgeRunMetadata = {
       autonomous: data.autonomous === true,
       delegationId: data.background_delegation_id,

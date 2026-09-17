@@ -1,6 +1,7 @@
 import { copyFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'fs/promises'
 import { createHash, randomUUID } from 'crypto'
 import { join, resolve } from 'path'
+import YAML from 'js-yaml'
 import { isPathWithin } from '../runtime/path'
 import { resolvePluginSkillDir, resolvePortablePluginDir } from './repo-scanner'
 import type { MarketplaceSourceRecord } from '../../../studio/public/marketplace'
@@ -42,6 +43,7 @@ export interface MarketplaceLockEntry {
   installedAt: string
   updatedAt: string
   installKind: MarketplaceInstallKind
+  companions?: string[]
 }
 
 export type MarketplaceLock = Record<string, MarketplaceLockEntry>
@@ -67,6 +69,9 @@ export async function readMarketplaceLock(skillsDir: string): Promise<Marketplac
           installedAt: String(e.installedAt || ''),
           updatedAt: String(e.updatedAt || ''),
           installKind: e.installKind === 'plugin' ? 'plugin' : 'skill',
+          companions: Array.isArray(e.companions)
+            ? e.companions.map(String)
+            : undefined,
         }
       }
       return out
@@ -184,6 +189,7 @@ export interface InstallSkillResult {
   installPath: string
   version: string
   contentHash: string
+  companions?: string[]
 }
 
 export async function installMarketplaceSkill(input: InstallSkillInput): Promise<InstallSkillResult> {
@@ -311,6 +317,54 @@ async function restoreFile(path: string, previous: string | null): Promise<void>
   }
 }
 
+interface BundledHermesCompanion {
+  name: string
+  sourceDir: string
+}
+
+async function readBundledHermesCompanion(sourceDir: string, portableName: string): Promise<BundledHermesCompanion | null> {
+  const companionDir = join(sourceDir, 'hermes-plugin')
+  let directoryInfo
+  try { directoryInfo = await stat(companionDir) } catch { return null }
+  if (!directoryInfo.isDirectory()) {
+    throw new MarketplaceInstallError('Bundled Hermes companion must be a directory', 400)
+  }
+  const manifestPath = join(companionDir, 'plugin.yaml')
+  let raw: string
+  try {
+    const info = await stat(manifestPath)
+    if (!info.isFile() || info.size > 64 * 1024) throw new Error('invalid manifest')
+    raw = await readFile(manifestPath, 'utf-8')
+  } catch {
+    throw new MarketplaceInstallError('Bundled Hermes companion requires plugin.yaml', 400)
+  }
+  let manifest: unknown
+  try { manifest = YAML.load(raw, { json: true }) } catch {
+    throw new MarketplaceInstallError('Bundled Hermes companion manifest is invalid', 400)
+  }
+  const record = manifest && typeof manifest === 'object' && !Array.isArray(manifest)
+    ? manifest as Record<string, unknown>
+    : {}
+  const name = String(record.name || '').trim()
+  if (!SKILL_NAME_PATTERN.test(name) || name === portableName) {
+    throw new MarketplaceInstallError('Bundled Hermes companion name is invalid', 400)
+  }
+  if (String(record.kind || '') !== 'standalone') {
+    throw new MarketplaceInstallError('Bundled Hermes companion must use kind standalone', 400)
+  }
+  let portableVersion = ''
+  try {
+    const portable = JSON.parse(await readFile(join(sourceDir, 'plugin.json'), 'utf-8')) as Record<string, unknown>
+    portableVersion = String(portable.version || '')
+  } catch {
+    throw new MarketplaceInstallError('Portable plugin version is unavailable', 400)
+  }
+  if (!portableVersion || String(record.version || '') !== portableVersion) {
+    throw new MarketplaceInstallError('Bundled Hermes companion version must match the portable plugin', 400)
+  }
+  return { name, sourceDir: companionDir }
+}
+
 export async function installMarketplacePlugin(input: InstallPluginInput): Promise<InstallSkillResult> {
   const { source, repoDir, profileDir, plugin } = input
   if (!SKILL_NAME_PATTERN.test(plugin)) {
@@ -331,6 +385,19 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
 
   const lock = await readMarketplaceLock(skillsDir)
   const existingEntry = lock[plugin]
+  const companion = await readBundledHermesCompanion(sourceDir, plugin)
+  const previousCompanions = existingEntry?.companions || []
+  const nextCompanions = companion ? [companion.name] : []
+  const companionTargetDir = companion ? join(pluginsDir, companion.name) : ''
+  if (
+    existingEntry?.installKind === 'plugin'
+    && JSON.stringify([...previousCompanions].sort()) !== JSON.stringify([...nextCompanions].sort())
+  ) {
+    throw new MarketplaceInstallError(
+      `Portable plugin "${plugin}" changed its bundled Hermes companions. Uninstall it before installing this version.`,
+      409,
+    )
+  }
   if (existingEntry?.installKind === 'skill' && existingEntry.plugin !== plugin) {
     throw new MarketplaceInstallError(
       `"${plugin}" is already installed as a skill from plugin "${existingEntry.plugin}". Uninstall it before installing this portable plugin.`,
@@ -351,19 +418,34 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
       409,
     )
   }
+  if (companion) {
+    let companionExists = false
+    try { companionExists = (await stat(companionTargetDir)).isDirectory() } catch { /* absent */ }
+    if (companionExists && !previousCompanions.includes(companion.name)) {
+      throw new MarketplaceInstallError(
+        `A plugin named "${companion.name}" already exists in this profile and is not managed as a companion of "${plugin}".`,
+        409,
+      )
+    }
+  }
 
   await mkdir(skillsDir, { recursive: true })
   await mkdir(pluginsDir, { recursive: true })
   const transactionId = randomUUID()
   const stagingDir = join(pluginsDir, `.marketplace-${plugin}-${transactionId}`)
   const backupDir = join(pluginsDir, `.marketplace-backup-${plugin}-${transactionId}`)
+  const companionStagingDir = companion ? join(pluginsDir, `.marketplace-${companion.name}-${transactionId}`) : ''
+  const companionBackupDir = companion ? join(pluginsDir, `.marketplace-backup-${companion.name}-${transactionId}`) : ''
   const configPath = join(resolvedProfileDir, 'config.yaml')
   const previousConfig = await readFile(configPath, 'utf-8').catch(() => null)
   let backedUp = false
   let installed = false
+  let companionBackedUp = false
+  let companionInstalled = false
 
   try {
     await copyPackageDir(sourceDir, stagingDir)
+    if (companion) await copyPackageDir(companion.sourceDir, companionStagingDir)
     const contentHash = await directoryHash(stagingDir)
     if (targetExists) {
       await rename(targetDir, backupDir)
@@ -371,7 +453,18 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
     }
     await rename(stagingDir, targetDir)
     installed = true
+    if (companion) {
+      try {
+        if ((await stat(companionTargetDir)).isDirectory()) {
+          await rename(companionTargetDir, companionBackupDir)
+          companionBackedUp = true
+        }
+      } catch { /* absent */ }
+      await rename(companionStagingDir, companionTargetDir)
+      companionInstalled = true
+    }
     await updateProfilePluginConfig(resolvedProfileDir, plugin, true)
+    if (companion) await updateProfilePluginConfig(resolvedProfileDir, companion.name, true)
 
     const now = new Date().toISOString()
     lock[plugin] = {
@@ -385,13 +478,15 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
       installedAt: existingEntry?.installedAt || now,
       updatedAt: now,
       installKind: 'plugin',
+      companions: companion ? [companion.name] : undefined,
     }
     await writeMarketplaceLock(skillsDir, lock)
 
     if (existingEntry?.installKind === 'skill') {
-      await rm(join(skillsDir, existingEntry.skill), { recursive: true, force: true })
+      await rm(join(skillsDir, existingEntry.skill), { recursive: true, force: true }).catch(() => undefined)
     }
-    if (backedUp) await rm(backupDir, { recursive: true, force: true })
+    if (backedUp) await rm(backupDir, { recursive: true, force: true }).catch(() => undefined)
+    if (companionBackedUp) await rm(companionBackupDir, { recursive: true, force: true }).catch(() => undefined)
     return {
       skill: plugin,
       plugin,
@@ -400,11 +495,15 @@ export async function installMarketplacePlugin(input: InstallPluginInput): Promi
       installPath: targetDir,
       version: input.version || '',
       contentHash,
+      companions: companion ? [companion.name] : undefined,
     }
   } catch (err) {
     await rm(stagingDir, { recursive: true, force: true })
+    if (companionStagingDir) await rm(companionStagingDir, { recursive: true, force: true })
     if (installed) await rm(targetDir, { recursive: true, force: true })
+    if (companionInstalled) await rm(companionTargetDir, { recursive: true, force: true })
     if (backedUp) await rename(backupDir, targetDir).catch(() => undefined)
+    if (companionBackedUp) await rename(companionBackupDir, companionTargetDir).catch(() => undefined)
     await restoreFile(configPath, previousConfig).catch(() => undefined)
     throw err
   }
@@ -431,8 +530,25 @@ export async function uninstallMarketplaceSkill(skillsDir: string, skill: string
   if (!isPathWithin(targetDir, entry.installKind === 'plugin' ? pluginsDir : resolvedSkillsDir)) {
     throw new MarketplaceInstallError('Invalid install path', 400)
   }
+  const companionDirs: Array<{ name: string; path: string }> = []
+  if (entry.installKind === 'plugin') {
+    for (const companion of entry.companions || []) {
+      if (!SKILL_NAME_PATTERN.test(companion)) {
+        throw new MarketplaceInstallError('Invalid companion name in marketplace lock', 400)
+      }
+      const companionDir = join(pluginsDir, companion)
+      if (!isPathWithin(companionDir, pluginsDir)) {
+        throw new MarketplaceInstallError('Invalid companion path in marketplace lock', 400)
+      }
+      companionDirs.push({ name: companion, path: companionDir })
+    }
+  }
   if (entry.installKind === 'plugin') {
     await updateProfilePluginConfig(profileDir, entry.plugin, false)
+    for (const companion of companionDirs) {
+      await updateProfilePluginConfig(profileDir, companion.name, false)
+      await rm(companion.path, { recursive: true, force: true })
+    }
   }
   await rm(targetDir, { recursive: true, force: true })
   delete lock[skill]

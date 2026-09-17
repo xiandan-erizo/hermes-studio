@@ -2,13 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AppBridge, PostMessageTransport, type McpUiHostContext, type McpUiStyles } from '@modelcontextprotocol/ext-apps/app-bridge'
-import { resolveMcpApp, type McpAppResolveResponse } from '@/api/hermes/mcp'
+import { callMcpAppTool, updateMcpAppModelContext, resolveMcpApp, type McpAppResolveResponse } from '@/api/hermes/mcp'
 import { useTheme } from '@/composables/useTheme'
 import { safeMcpAppExternalUrl, type McpAppInvocation } from '@/utils/hermes/mcp-app-result'
 import { buildSandboxUrl, mcpAppStyleVariables } from '@/utils/hermes/mcp-app-sandbox'
 import { createMcpAppTeardown } from '@/utils/hermes/mcp-app-lifecycle'
 
-const props = defineProps<{ invocation: McpAppInvocation; profile?: string }>()
+const props = defineProps<{ invocation: McpAppInvocation; profile?: string; sessionId?: string }>()
 const { t, locale } = useI18n()
 const { isDark } = useTheme()
 const iframeRef = ref<HTMLIFrameElement | null>(null)
@@ -100,7 +100,12 @@ async function startBridge(response: McpAppResolveResponse, cycle: number): Prom
   const { tool, resource } = JSON.parse(JSON.stringify(response)) as McpAppResolveResponse
   if (!target || !tool || !resource) throw new Error('App frame is unavailable')
   const sandboxUrl = buildSandboxUrl(window.location.origin, response.sandboxOrigin, resource._meta)
-  const currentBridge = new AppBridge(null, { name: 'Hermes Studio', version: '0.7' }, { openLinks: {} }, {
+  const binding = props.sessionId && props.profile && props.invocation.toolCallId ? {
+    sessionId: props.sessionId, profile: props.profile, toolCallId: props.invocation.toolCallId, toolName: props.invocation.toolName,
+  } : null
+  const currentBridge = new AppBridge(null, { name: 'Hermes Studio', version: '0.7' }, {
+    openLinks: {}, ...(binding ? { serverTools: {}, updateModelContext: { text: {}, structuredContent: {} } } : {}),
+  }, {
     hostContext: {
       ...hostContext(),
       toolInfo: {
@@ -117,6 +122,18 @@ async function startBridge(response: McpAppResolveResponse, cycle: number): Prom
   })
   bridge = currentBridge
   bridgeWindow = target
+  if (binding) {
+    currentBridge.oncalltool = async ({ name, arguments: args }) => {
+      if (cycle !== generation) throw new Error('App is no longer active')
+      const result = await callMcpAppTool(binding, { name, ...(args ? { arguments: args } : {}) })
+      if (cycle !== generation) throw new Error('App is no longer active')
+      return result
+    }
+    currentBridge.onupdatemodelcontext = async params => {
+      if (cycle !== generation) throw new Error('App is no longer active')
+      return updateMcpAppModelContext(binding, params)
+    }
+  }
   currentBridge.onopenlink = async ({ url }) => {
     if (cycle !== generation) return { isError: true }
     const safeUrl = safeMcpAppExternalUrl(url)
@@ -197,7 +214,7 @@ async function load(): Promise<void> {
 }
 
 watch([isDark, locale], async () => { await nextTick(); updateHostContext() })
-watch(() => props.profile, () => { void load() })
+watch(() => [props.profile, props.sessionId], () => { void load() })
 watch(() => JSON.stringify(props.invocation), (value, previous) => {
   const next = JSON.parse(value) as McpAppInvocation
   const before = JSON.parse(previous) as McpAppInvocation

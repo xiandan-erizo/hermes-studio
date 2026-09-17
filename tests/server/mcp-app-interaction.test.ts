@@ -1,0 +1,37 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({ getSession: vi.fn(), getSessionDetail: vi.fn(), canOperateSession: vi.fn() }))
+vi.mock('../../packages/server/src/modules/studio/repositories/session-store', () => mocks)
+vi.mock('../../packages/server/src/modules/studio/services/session-access', () => ({ canOperateSession: mocks.canOperateSession }))
+
+import { requireMcpAppInvocation, validateModelContext } from '../../packages/server/src/modules/studio/services/mcp-apps/interactions'
+
+describe('MCP App invocation authorization', () => {
+  beforeEach(() => {
+    mocks.getSession.mockReturnValue({ id: 's1', profile: 'work', owner_user_id: 7 })
+    mocks.canOperateSession.mockImplementation((user, session) => user?.id === session?.owner_user_id)
+    mocks.getSessionDetail.mockReturnValue({ messages: [{ role: 'tool', tool_name: 'mcp__demo__render', tool_call_id: 'call1', content: JSON.stringify({ content: [{ type: 'text', text: 'ok' }] }) }] })
+  })
+  const binding = { sessionId: 's1', toolCallId: 'call1', toolName: 'mcp__demo__render' }
+  it('accepts the recorded invocation only for its owner and profile', () => {
+    expect(requireMcpAppInvocation({ id: 7 }, 'work', binding)).toEqual(binding)
+    expect(() => requireMcpAppInvocation({ id: 8 }, 'work', binding)).toThrow()
+    expect(() => requireMcpAppInvocation({ id: 7 }, 'other', binding)).toThrow()
+    expect(() => requireMcpAppInvocation({ id: 7 }, 'work', { ...binding, toolName: 'mcp__other__render' })).toThrow()
+    expect(() => requireMcpAppInvocation({ id: 7 }, 'work', { ...binding, toolCallId: 'not-recorded' })).toThrow()
+  })
+  it('fails closed for failed and ambiguous tool results', () => {
+    mocks.getSessionDetail.mockReturnValue({ messages: [{ role: 'tool', tool_name: binding.toolName, tool_call_id: binding.toolCallId, content: '{"isError":true,"content":[]}' }] })
+    expect(() => requireMcpAppInvocation({ id: 7 }, 'work', binding)).toThrow()
+    mocks.getSessionDetail.mockReturnValue({ messages: Array(2).fill({ role: 'tool', tool_name: binding.toolName, tool_call_id: binding.toolCallId, content: '{"content":[]}' }) })
+    expect(() => requireMcpAppInvocation({ id: 7 }, 'work', binding)).toThrow()
+  })
+  it('bounds model context and accepts only text/structured data', () => {
+    expect(validateModelContext({ content: [{ type: 'text', text: 'draft saved' }], structuredContent: { version: 2 } })).toEqual({ content: [{ type: 'text', text: 'draft saved' }], structuredContent: { version: 2 } })
+    expect(() => validateModelContext({ content: [{ type: 'image', data: 'secret' }] })).toThrow()
+    expect(() => validateModelContext({ structuredContent: { text: 'x'.repeat(9000) } })).toThrow()
+    expect(() => validateModelContext({ _meta: { forged: true } })).toThrow()
+    expect(validateModelContext({ content: [{ type: 'text', text: 'saved', annotations: { audience: ['assistant'], priority: 0.5 }, _meta: { display: 'compact' } }] }).content?.[0].text).toBe('saved')
+    expect(() => validateModelContext({ content: [{ type: 'text', text: 'saved', annotations: { priority: 3 } }] })).toThrow()
+  })
+})

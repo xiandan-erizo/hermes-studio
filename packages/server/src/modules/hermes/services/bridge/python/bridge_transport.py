@@ -17,6 +17,14 @@ from urllib.parse import urlparse
 
 from bridge_runtime import _hidden_subprocess_kwargs, _json_line_bytes, _platform_text_encoding
 
+class WorkerResponseError(RuntimeError):
+    """A valid worker reply whose domain error must survive broker forwarding."""
+
+    def __init__(self, response: dict[str, Any]) -> None:
+        super().__init__(str(response.get("error") or "worker request failed"))
+        self.response = response
+
+
 class WorkerProcess:
     STARTUP_TIMEOUT_SECONDS = 120
     REQUEST_TIMEOUT_SECONDS = 120
@@ -223,7 +231,7 @@ def _send_bridge_request(endpoint: str, req: dict[str, Any], timeout: float) -> 
             raise RuntimeError("worker closed without a response")
         resp = json.loads(line.decode("utf-8"))
         if not resp.get("ok"):
-            raise RuntimeError(str(resp.get("error") or "worker request failed"))
+            raise WorkerResponseError(resp)
         return resp
     finally:
         try:

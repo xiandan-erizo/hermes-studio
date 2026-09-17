@@ -285,6 +285,18 @@ describe('MCP Controller', () => {
   })
 
   describe('resolveApp', () => {
+    it('returns not-found for tools without a UI and keeps real bridge failures retryable', async () => {
+      const { resolveApp } = await import('../../packages/server/src/modules/hermes/controllers/mcp')
+      for (const [code, status] of [['mcp_app_not_found', 404], ['mcp_app_server_unavailable', 503]] as const) {
+        mcpAppResolveMock.mockRejectedValue(Object.assign(new Error('resource unavailable'), {
+          response: { ok: false, code, error: 'resource unavailable' },
+        }))
+        const ctx = createCtx({ request: { body: { toolName: 'mcp__test__tool' } } })
+        await resolveApp(ctx)
+        expect(ctx.status).toBe(status)
+        expect(ctx.body.code).toBe(code)
+      }
+    })
     it('does not expose credentials from an invalid sandbox origin setting', async () => {
       vi.stubEnv('HERMES_MCP_APP_SANDBOX_ORIGIN', 'https://user:private-password@views.example.test')
       try {

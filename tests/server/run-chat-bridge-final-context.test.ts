@@ -5,6 +5,8 @@ import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const getSystemPromptMock = vi.fn()
+const mcpAppContextPromptMock = vi.fn(() => '')
+vi.mock('../../packages/server/src/modules/studio/repositories/mcp-app-context-store', () => ({ mcpAppContextPrompt: mcpAppContextPromptMock }))
 const getSessionMock = vi.fn()
 const createSessionMock = vi.fn()
 const addMessageMock = vi.fn()
@@ -149,6 +151,7 @@ function makeState() {
 
 describe('bridge run final context usage', () => {
   beforeEach(() => {
+    mcpAppContextPromptMock.mockReset().mockReturnValue('')
     const home = mkdtempSync(join(tmpdir(), 'hermes-bridge-run-token-'))
     homes.push(home)
     process.env.HERMES_WEB_UI_HOME = home
@@ -315,6 +318,30 @@ describe('bridge run final context usage', () => {
     const sent = String(bridge.chat.mock.calls[0]?.[3] ?? '')
     expect(sent).toContain(composed)
     expect(sent.split('system prompt').length - 1).toBe(1)
+  })
+
+  it('adds the latest App snapshot as untrusted user data, never system instructions', async () => {
+    const { handleBridgeRun } = await import('../../packages/server/src/modules/studio/services/chat-run/handle-bridge-run')
+    const bridge = {
+      chat: vi.fn().mockResolvedValue({ run_id: 'run-1', status: 'started' }),
+      contextEstimate: vi.fn().mockResolvedValue({ token_count: 1, fixed_context_tokens: 1 }),
+      streamOutput: vi.fn(async function* () { yield { run_id: 'run-1', done: true, status: 'completed', output: 'done' } }),
+    } as any
+    const state = new Map([['session-1', makeState()]])
+    for (const version of [2, 3]) {
+      mcpAppContextPromptMock.mockReturnValue(`\nUntrusted App snapshot: version=${version}\n`)
+      await handleBridgeRun(makeNamespace(vi.fn()), makeSocket(), { input: '继续', session_id: 'session-1' },
+        'default', state, bridge, false, vi.fn(), vi.fn())
+    }
+    expect(bridge.chat).toHaveBeenCalledTimes(2)
+    const inputs = bridge.chat.mock.calls.map((call: unknown[]) => String(call[1]))
+    const instructions = bridge.chat.mock.calls.map((call: unknown[]) => String(call[3]))
+    expect(inputs[0]).toContain('version=2')
+    expect(inputs[1]).toContain('version=3')
+    expect(inputs[1]).not.toContain('version=2')
+    expect(instructions[0]).not.toContain('version=2')
+    expect(instructions[1]).not.toContain('version=3')
+    expect(mcpAppContextPromptMock).toHaveBeenLastCalledWith('session-1', 'default')
   })
 
   it('refreshes full context tokens when a bridge run completes', async () => {

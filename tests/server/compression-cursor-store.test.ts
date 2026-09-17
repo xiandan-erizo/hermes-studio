@@ -51,6 +51,8 @@ describe('compression cursor persistence', () => {
     const { addMessage, clearSessionMessages, createSession, getSession } = await import('../../packages/server/src/modules/studio/repositories/session-store')
     const { getCompressionSnapshot, saveCompressionSnapshot } = await import('../../packages/server/src/modules/studio/repositories/compression-snapshot')
     createSession({ id: 'session-clear', source: 'cli' })
+    db.prepare(`INSERT INTO mcp_app_context(id,session_id,profile,tool_name,context_json,updated_at) VALUES(?,?,?,?,?,?)`)
+      .run('context-1', 'session-clear', 'default', 'mcp__demo__render', '{}', Date.now())
     const boundaryId = addMessage({ session_id: 'session-clear', role: 'user', content: 'old' })!
     expect(saveCompressionSnapshot('session-clear', 'old summary', 0, 1, {
       compressedThroughMessageId: boundaryId,
@@ -58,6 +60,7 @@ describe('compression cursor persistence', () => {
     })).toBe(true)
 
     expect(clearSessionMessages('session-clear')).toBe(1)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mcp_app_context WHERE session_id=?').get('session-clear')?.n).toBe(0)
     expect(getCompressionSnapshot('session-clear')).toBeNull()
     expect(getSession('session-clear')?.history_revision).toBe(1)
     const replacementId = addMessage({ session_id: 'session-clear', role: 'user', content: 'new' })!

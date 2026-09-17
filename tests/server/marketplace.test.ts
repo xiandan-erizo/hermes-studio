@@ -332,6 +332,109 @@ Body text here.
       expect(disabledConfig).not.toMatch(/disabled:[\s\S]*demo-tool/)
     })
 
+    it('installs and removes a bundled native companion with the portable plugin', async () => {
+      const repo = await writePortableFixtureRepo()
+      const sourcePlugin = join(repo, 'plugins', 'demo-tool')
+      await mkdir(join(sourcePlugin, 'hermes-plugin'), { recursive: true })
+      await writeFile(join(sourcePlugin, 'hermes-plugin', 'plugin.yaml'), [
+        'name: demo-tool-runtime',
+        'kind: standalone',
+        'version: 1.2.3',
+        'description: Native workflow companion.',
+        '',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(sourcePlugin, 'hermes-plugin', '__init__.py'), 'def register(ctx):\n    pass\n', 'utf-8')
+      const profileDir = join(workDir, 'companion-profile')
+      const skillsDir = join(profileDir, 'skills')
+      const pluginsDir = join(profileDir, 'plugins')
+      const companionData = join(profileDir, 'plugin-data', 'demo-tool-runtime', 'state.json')
+      await mkdir(join(profileDir, 'plugin-data', 'demo-tool-runtime'), { recursive: true })
+      await writeFile(companionData, '{"kept":true}\n', 'utf-8')
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const {
+        installMarketplacePlugin,
+        uninstallMarketplaceSkill,
+        readMarketplaceLock,
+      } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      const installed = await installMarketplacePlugin({
+        source,
+        repoDir: repo,
+        profileDir,
+        plugin: 'demo-tool',
+        version: '1.2.3',
+      })
+
+      expect(installed).toMatchObject({ companions: ['demo-tool-runtime'] })
+      expect(await readFile(join(pluginsDir, 'demo-tool-runtime', 'plugin.yaml'), 'utf-8')).toContain('demo-tool-runtime')
+      expect(await readFile(join(pluginsDir, 'demo-tool-runtime', '__init__.py'), 'utf-8')).toContain('register')
+      expect((await readMarketplaceLock(skillsDir))['demo-tool']).toMatchObject({ companions: ['demo-tool-runtime'] })
+      const enabledConfig = await readFile(join(profileDir, 'config.yaml'), 'utf-8')
+      expect(enabledConfig).toMatch(/enabled:[\s\S]*demo-tool[\s\S]*demo-tool-runtime/)
+
+      await uninstallMarketplaceSkill(skillsDir, 'demo-tool')
+
+      await expect(stat(join(pluginsDir, 'demo-tool'))).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(stat(join(pluginsDir, 'demo-tool-runtime'))).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(companionData, 'utf-8')).toContain('kept')
+    })
+
+    it('rejects a bundled native companion with a mismatched portable version', async () => {
+      const repo = await writePortableFixtureRepo()
+      const sourcePlugin = join(repo, 'plugins', 'demo-tool')
+      await mkdir(join(sourcePlugin, 'hermes-plugin'), { recursive: true })
+      await writeFile(join(sourcePlugin, 'hermes-plugin', 'plugin.yaml'), [
+        'name: demo-tool-runtime',
+        'kind: standalone',
+        'version: 9.9.9',
+        '',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(sourcePlugin, 'hermes-plugin', '__init__.py'), 'def register(ctx):\n    pass\n', 'utf-8')
+      const profileDir = join(workDir, 'companion-version-profile')
+      await mkdir(profileDir, { recursive: true })
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const { installMarketplacePlugin, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+
+      await expect(installMarketplacePlugin({
+        source,
+        repoDir: repo,
+        profileDir,
+        plugin: 'demo-tool',
+        version: '1.2.3',
+      })).rejects.toThrow(MarketplaceInstallError)
+    })
+
+    it('requires uninstall before an update removes its managed companion', async () => {
+      const repo = await writePortableFixtureRepo()
+      const sourcePlugin = join(repo, 'plugins', 'demo-tool')
+      await mkdir(join(sourcePlugin, 'hermes-plugin'), { recursive: true })
+      await writeFile(join(sourcePlugin, 'hermes-plugin', 'plugin.yaml'), [
+        'name: demo-tool-runtime',
+        'kind: standalone',
+        'version: 1.2.3',
+        '',
+      ].join('\n'), 'utf-8')
+      await writeFile(join(sourcePlugin, 'hermes-plugin', '__init__.py'), 'def register(ctx):\n    pass\n', 'utf-8')
+      const profileDir = join(workDir, 'companion-removal-profile')
+      await mkdir(profileDir, { recursive: true })
+      await writeFile(join(profileDir, 'config.yaml'), '{}\n', 'utf-8')
+      const { installMarketplacePlugin, MarketplaceInstallError } = await loadInstall()
+      const source = { id: 7, name: 'src', url: 'git@host:grp/repo.git', enabled: 1 } as any
+      await installMarketplacePlugin({ source, repoDir: repo, profileDir, plugin: 'demo-tool', version: '1.2.3' })
+      await rm(join(sourcePlugin, 'hermes-plugin'), { recursive: true, force: true })
+
+      await expect(installMarketplacePlugin({
+        source,
+        repoDir: repo,
+        profileDir,
+        plugin: 'demo-tool',
+        version: '1.3.0',
+      })).rejects.toThrow(MarketplaceInstallError)
+      expect(await readFile(join(profileDir, 'plugins', 'demo-tool-runtime', 'plugin.yaml'), 'utf-8')).toContain('demo-tool-runtime')
+    })
+
     it('migrates a same-source marketplace skill into its portable plugin package', async () => {
       const repo = await writePortableFixtureRepo()
       const profileDir = join(workDir, 'migration-profile')
@@ -404,6 +507,30 @@ Body text here.
 
       await expect(uninstallMarketplaceSkill(skillsDir, 'demo')).rejects.toThrow(MarketplaceInstallError)
       expect(await readFile(join(outsidePlugin, 'marker.txt'), 'utf-8')).toBe('keep\n')
+    })
+
+    it('refuses a portable uninstall with a polluted companion path in its lock', async () => {
+      const profileDir = join(workDir, 'polluted-companion-lock-profile')
+      const skillsDir = join(profileDir, 'skills')
+      const pluginDir = join(profileDir, 'plugins', 'demo-tool')
+      const outsidePlugin = join(workDir, 'outside-companion')
+      await mkdir(skillsDir, { recursive: true })
+      await mkdir(pluginDir, { recursive: true })
+      await mkdir(outsidePlugin, { recursive: true })
+      await writeFile(join(outsidePlugin, 'marker.txt'), 'keep\n', 'utf-8')
+      await writeFile(join(profileDir, 'config.yaml'), 'plugins:\n  enabled:\n    - demo-tool\n', 'utf-8')
+      await writeFile(join(skillsDir, '.webui-marketplace-lock.json'), JSON.stringify({
+        'demo-tool': {
+          sourceId: 7, sourceName: 'src', url: 'git@host:repo.git', plugin: 'demo-tool', skill: 'demo-tool',
+          version: '1.0.0', contentHash: '', installedAt: '', updatedAt: '', installKind: 'plugin',
+          companions: ['../../../outside-companion'],
+        },
+      }), 'utf-8')
+      const { uninstallMarketplaceSkill, MarketplaceInstallError } = await loadInstall()
+
+      await expect(uninstallMarketplaceSkill(skillsDir, 'demo-tool')).rejects.toThrow(MarketplaceInstallError)
+      expect(await readFile(join(outsidePlugin, 'marker.txt'), 'utf-8')).toBe('keep\n')
+      expect(await readFile(join(profileDir, 'config.yaml'), 'utf-8')).toMatch(/enabled:[\s\S]*demo-tool/)
     })
   })
 

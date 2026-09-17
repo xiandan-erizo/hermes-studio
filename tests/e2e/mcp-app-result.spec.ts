@@ -85,18 +85,28 @@ const navigationMessage = JSON.stringify({
 })
 const navigationAttemptHtml = '<!doctype html><body><script>setTimeout(() => location.replace("https://navigated-mcp-app.example.test/"), 0)</script></body>'
 
-function toolResult(model: Record<string, unknown> = ticketModel) {
+function toolResult(model: Record<string, unknown> = ticketModel, meta?: Record<string, unknown>) {
   return JSON.stringify({
     result: '工单已提交 · CYXQ-123',
     structuredContent: model,
+    ...(meta ? { _meta: meta } : {}),
   })
 }
 
-async function setup(page: Page, withMessages = true, html = appHtml, model: Record<string, unknown> = ticketModel) {
+async function setup(page: Page, withMessages = true, html = appHtml, model: Record<string, unknown> = ticketModel, withPlainTool = false, meta?: Record<string, unknown>) {
   const liveSandboxOrigin = html !== appHtml ? process.env.MCP_APP_VISUAL_SANDBOX_ORIGIN : undefined
   await authenticate(page, userToken, 'research')
   const messages = buildResumeMessages(withMessages ? [
     { id: 1, session_id: sessionId, role: 'user', content: '展示工单结果', timestamp: 1 },
+    ...(withPlainTool ? [
+      { id: 10, session_id: sessionId, role: 'assistant', content: '', timestamp: 1,
+        tool_calls: [{ id: 'identity-call', type: 'function', function: {
+          name: 'mcp__hermes_studio_use__hermes_studio_use_toolset', arguments: '{}',
+        } }] },
+      { id: 11, session_id: sessionId, role: 'tool', timestamp: 1,
+        tool_call_id: 'identity-call', tool_name: 'mcp__hermes_studio_use__hermes_studio_use_toolset',
+        content: JSON.stringify({ result: JSON.stringify({ identity: { role: 'user' } }) }) },
+    ] : []),
     {
       id: 2, session_id: sessionId, role: 'assistant', content: '', timestamp: 2,
       tool_calls: [{
@@ -108,7 +118,7 @@ async function setup(page: Page, withMessages = true, html = appHtml, model: Rec
       }],
     },
     {
-      id: 3, session_id: sessionId, role: 'tool', content: toolResult(model),
+      id: 3, session_id: sessionId, role: 'tool', content: toolResult(model, meta),
       tool_call_id: 'app-call', tool_name: 'mcp__ticket__render_ticket_card', timestamp: 3,
     },
     { id: 4, session_id: sessionId, role: 'assistant', content: '请查看工单回执。', timestamp: 4, finish_reason: 'stop' },
@@ -294,6 +304,24 @@ test('reconnects the App after its existing chat row moves in the document', asy
   await expect(heading).toBeVisible()
 })
 
+test('a plain user sees only the App card when a normal MCP tool has no UI', async ({ page }) => {
+  await setup(page, true, appHtml, ticketModel, true)
+  let identityResolved = false
+  await page.route('**/api/hermes/mcp/apps/resolve', async route => {
+    if (route.request().postDataJSON().toolName !== 'mcp__hermes_studio_use__hermes_studio_use_toolset') return route.fallback()
+    identityResolved = true
+    return route.fulfill({ status: 404, json: {
+      code: 'mcp_app_not_found', error: 'The MCP tool does not declare an App resource',
+    } })
+  })
+  await page.goto(`/#/hermes/session/${sessionId}`)
+  const card = page.locator('.mcp-app-result')
+  await expect(card.frameLocator('iframe').frameLocator('iframe').getByRole('heading', { name: '审批页面偶发 500' })).toBeVisible()
+  expect(identityResolved).toBe(true)
+  await expect(card).toHaveCount(1)
+  await expect(page.locator('.result-error')).toHaveCount(0)
+})
+
 test('offers a retry and text fallback when the App never initializes', async ({ page }) => {
   await setup(page)
   let requests = 0
@@ -358,4 +386,65 @@ test('previews a supplied bundled ticket widget in Studio', async ({ page }, tes
   await page.reload()
   await expect(view.locator('html')).toHaveAttribute('data-theme', 'dark')
   await card.screenshot({ path: testInfo.outputPath('ticket-dark.png') })
+})
+
+test('edits a supplied ticket widget through standard tools/call and preserves conflicts', async ({ page }, testInfo) => {
+  const widgetPath = process.env.MCP_APP_VISUAL_WIDGET_PATH
+  test.skip(!widgetPath, 'Set MCP_APP_VISUAL_WIDGET_PATH to test the independently packaged plugin.')
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  let version = 1
+  let expectedBehavior = ''
+  const contexts: any[] = []
+  const calls: any[] = []
+  const fields = () => ({ title: '审批页面偶发 500', description: '审批提交失败', actual_behavior: '提交后提示 500', expected_behavior: expectedBehavior, impact_scope: '测试用户 3 人', environment: '测试环境', product_module: '审批', attachment_notes: '' })
+  const model = () => ({ ...ticketModel, kind: 'draft', heading: '工单草稿', status: '草稿 · 尚未提交', ticketId: null, ticketUrl: null,
+    description: '审批提交失败', facts: [{ label: '期望表现', value: expectedBehavior || '待补充' }], missing: expectedBehavior ? ['报告人'] : ['期望表现', '报告人'] })
+  const meta = () => ({ ticketEdit: { editToken: 'test-draft-credential', draftId: 'dr_test', version, fields: fields() } })
+  await setup(page, true, readFileSync(widgetPath!, 'utf8'), model(), false, meta())
+  await page.route('**/api/hermes/mcp/apps/call-tool', async route => {
+    const body = route.request().postDataJSON()
+    calls.push(body)
+    expect(body.sessionId).toBe(sessionId)
+    expect(body.toolCallId).toBe('app-call')
+    expect(body.profile).toBe('research')
+    expect(body.toolName).toBe('mcp__ticket__render_ticket_card')
+    if (body.params.name === 'update_ticket_draft') {
+      if (body.params.arguments.version !== version) return route.fulfill({ json: {
+        isError: true, content: [{ type: 'text', text: 'Draft version conflict' }], _meta: { ticketEditError: { code: 'version_conflict' } },
+      } })
+      expectedBehavior = body.params.arguments.fields.expected_behavior
+      version++
+    } else expect(body.params.name).toBe('get_ticket_draft')
+    return route.fulfill({ json: { content: [{ type: 'text', text: 'saved' }], structuredContent: model(), _meta: meta() } })
+  })
+  await page.route('**/api/hermes/mcp/apps/model-context', async route => {
+    contexts.push(route.request().postDataJSON())
+    return route.fulfill({ json: {} })
+  })
+  await page.goto('/#/hermes/session/' + sessionId)
+  const card = page.locator('.mcp-app-result')
+  const view = card.frameLocator('iframe').frameLocator('iframe')
+  await expect.poll(() => calls.length).toBe(1)
+  await view.getByRole('button', { name: '查看详情' }).click()
+  const input = view.locator('#ticket-edit-expected_behavior')
+  await expect(input).toBeEnabled()
+  await input.fill('审批正常提交')
+  await view.locator('#ticket-save-draft').click()
+  await expect(view.locator('#ticket-edit-status')).toContainText('草稿已保存')
+  await expect.poll(() => contexts.length).toBe(1)
+  expect(calls[1].params.arguments.fields).toEqual({ expected_behavior: '审批正常提交' })
+  expect(JSON.stringify(contexts)).toContain('审批正常提交')
+  expect(JSON.stringify(contexts)).not.toContain('test-draft-credential')
+  version++ // Another editor saved after this view read the draft.
+  await input.fill('保留这次未保存的输入')
+  await view.locator('#ticket-save-draft').click()
+  await expect(view.locator('#ticket-edit-status')).toContainText('未保存的输入已保留')
+  await expect(input).toHaveValue('保留这次未保存的输入')
+  expect(contexts).toHaveLength(1)
+  await view.locator('#ticket-reload-draft').click()
+  await expect(input).toHaveValue('审批正常提交')
+  await card.screenshot({ path: testInfo.outputPath('ticket-interactive.png') })
+  await page.reload()
+  await view.getByRole('button', { name: '查看详情' }).click()
+  await expect(input).toHaveValue('审批正常提交')
 })

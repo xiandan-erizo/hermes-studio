@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import fnmatch
 import json
 import os
 import socket
@@ -13,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge_mcp_apps import install_mcp_apps_adapter, resolve_mcp_app_identity
+from bridge_mcp_interactions import call_app_tool
 from bridge_pool import AgentPool
 from bridge_runtime import (
     _agent_root,
@@ -341,6 +343,24 @@ class BridgeServer:
             value = value.model_dump(mode="json", by_alias=True, exclude_none=True)
         return _jsonable(value) if isinstance(value, dict) else {}
 
+    @staticmethod
+    def _mcp_tool_enabled(tool_name: str, tools_filter: Any, *, raw: bool = False) -> bool:
+        if raw or not isinstance(tools_filter, dict):
+            return True
+        def patterns(value):
+            return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+        def matches(values):
+            return any(
+                tool_name == pattern if not any(char in pattern for char in "*?[")
+                else fnmatch.fnmatchcase(tool_name, pattern)
+                for pattern in values
+            )
+        if "include" in tools_filter:
+            return matches(patterns(tools_filter.get("include")))
+        if "exclude" in tools_filter:
+            return not matches(patterns(tools_filter.get("exclude")))
+        return True
+
     def _read_mcp_config(self, profile=None):
         """Read config.yaml for the given profile."""
         import yaml
@@ -429,6 +449,9 @@ class BridgeServer:
             "mcp_server_test":     lambda: self._mcp_server_test(req, _servers, _lock),
             "mcp_tools_list":      lambda: self._mcp_tools_list(req, profile, _servers, _lock),
             "mcp_app_resolve":     lambda: self._mcp_app_resolve(
+                req, profile, _servers, _lock, _run_on_mcp_loop, mcp_prefixed_tool_name
+            ),
+            "mcp_app_call_tool":   lambda: self._mcp_app_call_tool(
                 req, profile, _servers, _lock, _run_on_mcp_loop, mcp_prefixed_tool_name
             ),
             "mcp_reload":          lambda: self._mcp_reload(req, profile, _servers, _lock, _run_on_mcp_loop, discover_mcp_tools, register_mcp_servers),
@@ -547,17 +570,11 @@ class BridgeServer:
             # Build filtered tool_details (name + description) for card display
             srv_cfg = mcp_configs.get(name, {}) if isinstance(mcp_configs.get(name), dict) else {}
             tools_filter = srv_cfg.get("tools") if isinstance(srv_cfg.get("tools"), dict) else {}
-            has_include_filter = "include" in tools_filter
-            has_exclude_filter = "exclude" in tools_filter
-            include_set = set(tools_filter.get("include") or [])
-            exclude_set = set(tools_filter.get("exclude") or [])
             tool_details = []
             try:
                 for mcp_tool in getattr(task, "_tools", []):
                     tname = getattr(mcp_tool, "name", "?")
-                    if has_include_filter and tname not in include_set:
-                        continue
-                    if has_exclude_filter and tname in exclude_set:
+                    if not self._mcp_tool_enabled(tname, tools_filter):
                         continue
                     tool_details.append({
                         "name": tname,
@@ -715,18 +732,8 @@ class BridgeServer:
             tools = []
             srv_cfg = mcp_configs.get(sname, {}) if isinstance(mcp_configs.get(sname), dict) else {}
             tools_filter = srv_cfg.get("tools") if isinstance(srv_cfg.get("tools"), dict) else {}
-            has_include_filter = "include" in tools_filter
-            has_exclude_filter = "exclude" in tools_filter
-            include_set = set(tools_filter.get("include") or [])
-            exclude_set = set(tools_filter.get("exclude") or [])
             def _should_include(tn):
-                if raw_mode:
-                    return True  # Skip filter in raw mode
-                if has_include_filter:
-                    return tn in include_set
-                if has_exclude_filter:
-                    return tn not in exclude_set
-                return True
+                return self._mcp_tool_enabled(tn, tools_filter, raw=raw_mode)
             try:
                 for mcp_tool in getattr(task, "_tools", []):
                     tname = getattr(mcp_tool, "name", "?")
@@ -753,6 +760,9 @@ class BridgeServer:
 
         return {"ok": True, "results": results}
 
+    def _mcp_app_call_tool(self, req, profile, servers, lock, run, prefix):
+        return call_app_tool(self, req, profile, servers, lock, run, prefix, _jsonable)
+
     def _mcp_app_resolve(self, req: dict, profile: str, _servers, _lock,
                          run_on_mcp_loop, prefixed_tool_name) -> dict[str, Any]:
         registered_name = str(req.get("tool_name") or "").strip()
@@ -767,18 +777,14 @@ class BridgeServer:
 
         for server_name, task in snapshot:
             server_config = mcp_configs.get(server_name, {}) if isinstance(mcp_configs.get(server_name), dict) else {}
+            if server_config.get("enabled") is False or getattr(task, "_config", {}).get("enabled") is False:
+                continue
             tools_filter = server_config.get("tools") if isinstance(server_config.get("tools"), dict) else {}
-            has_include_filter = "include" in tools_filter
-            has_exclude_filter = "exclude" in tools_filter
-            include_set = set(tools_filter.get("include") or [])
-            exclude_set = set(tools_filter.get("exclude") or [])
             for mcp_tool in getattr(task, "_tools", []):
                 raw_name = str(getattr(mcp_tool, "name", "") or "")
                 if not raw_name or prefixed_tool_name(server_name, raw_name) != registered_name:
                     continue
-                if has_include_filter and raw_name not in include_set:
-                    continue
-                if has_exclude_filter and raw_name in exclude_set:
+                if not self._mcp_tool_enabled(raw_name, tools_filter):
                     continue
                 tool_meta = _jsonable(self._mcp_field(mcp_tool, "meta", "_meta") or {})
                 resource_uri = self._mcp_app_resource_uri(tool_meta)
