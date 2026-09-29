@@ -66,3 +66,12 @@ it('stores only the latest standard context without executing a tool or run', as
   expect((await post('model-context', { ...binding, params: { content: [{ type: 'text', text: 'private' }] } }, true)).status).toBe(404)
   expect(mcpAppContextPrompt('s1', 'work')).not.toContain('private')
 })
+
+it('validates a standard App user message against the persisted invocation', async () => {
+  const params = { role: 'user', content: [{ type: 'text', text: 'continue ticket validation' }] }
+  const response = await post('message', { ...binding, params })
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ message: 'continue ticket validation' })
+  expect((await post('message', { ...binding, params }, true)).status).toBe(404)
+  expect((await post('message', { ...binding, params: { role: 'assistant', content: params.content } })).status).toBe(400)
+})

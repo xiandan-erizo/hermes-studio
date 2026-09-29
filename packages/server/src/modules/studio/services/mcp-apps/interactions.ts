@@ -1,5 +1,5 @@
 import { getSession, getSessionDetail } from '../../repositories/session-store'
-import { McpUiUpdateModelContextRequestSchema } from '@modelcontextprotocol/ext-apps/app-bridge'
+import { McpUiMessageRequestSchema, McpUiUpdateModelContextRequestSchema } from '@modelcontextprotocol/ext-apps/app-bridge'
 import { canOperateSession, type SessionAccessUser } from '../session-access'
 
 export interface McpAppBinding {
@@ -14,6 +14,41 @@ export function interactionError(message: string, status = 400): Error {
 
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function jsonValue(value: unknown): unknown {
+  if (typeof value !== 'string' || value.length > 2 * 1024 * 1024) return value
+  try { return JSON.parse(value) } catch { return value }
+}
+
+function versionedDraft(value: unknown, depth = 0): { id: string; version: number; envelope: Record<string, unknown> } | null {
+  if (depth > 6) return null
+  const parsed = jsonValue(value)
+  if (!object(parsed)) return null
+  if (typeof parsed.draft_id === 'string' && Number.isInteger(parsed.version)) {
+    return { id: parsed.draft_id, version: Number(parsed.version), envelope: parsed }
+  }
+  const draft = object(parsed.draft) ? parsed.draft : null
+  if (draft && typeof draft.draft_id === 'string' && Number.isInteger(draft.version)) {
+    return { id: draft.draft_id, version: Number(draft.version), envelope: parsed }
+  }
+  for (const key of ['data', 'result', 'output']) {
+    const nested = versionedDraft(parsed[key], depth + 1)
+    if (nested) return nested
+  }
+  return null
+}
+
+function invocationArguments(detail: ReturnType<typeof getSessionDetail>, binding: McpAppBinding): Record<string, unknown> | null {
+  const assistant = detail?.messages.find(message => (
+    message.role === 'assistant'
+    && Array.isArray(message.tool_calls)
+    && message.tool_calls.some((call: any) => String(call?.id || '') === binding.toolCallId)
+  ))
+  const call = assistant?.tool_calls?.find((item: any) => String(item?.id || '') === binding.toolCallId) as any
+  const args = call?.function?.arguments
+  const parsed = jsonValue(args)
+  return object(parsed) ? parsed : null
 }
 
 function successfulToolResult(text: string): boolean {
@@ -43,13 +78,39 @@ export function requireMcpAppInvocation(user: SessionAccessUser | undefined, pro
   if (!session || session.profile !== profile || !canOperateSession(user, session)) {
     throw interactionError('Session is not available', 404)
   }
-  const matches = getSessionDetail(binding.sessionId)?.messages.filter(message => (
+  const detail = getSessionDetail(binding.sessionId)
+  const matches = detail?.messages.filter(message => (
     message.role === 'tool' && message.tool_call_id === binding.toolCallId && message.tool_name === binding.toolName
   )) || []
-  if (!binding.toolName.startsWith('mcp__') || matches.length !== 1 || !successfulToolResult(matches[0].content)) {
+  if (!binding.toolName.startsWith('mcp__')) {
     throw interactionError('App invocation is not available', 404)
   }
-  return binding
+  if (matches.length === 1 && successfulToolResult(matches[0].content)) return binding
+
+  // A resumed or duplicated App can retain an older toolCallId after the
+  // model produced another renderer result. Keep the binding session-scoped,
+  // but move it to the newest successful call for the same draft. This avoids
+  // transient 404s without allowing a card to cross session/profile ownership.
+  const requestedDraftId = versionedDraft(invocationArguments(detail, binding)?.result)?.id
+  if (requestedDraftId && detail) {
+    const fallback = detail.messages
+      .filter(message => (
+        message.role === 'tool'
+        && message.tool_name === binding.toolName
+        && successfulToolResult(message.content)
+      ))
+      .map(message => {
+        const candidateBinding = { ...binding, toolCallId: String(message.tool_call_id || '') }
+        const candidateDraftId = versionedDraft(invocationArguments(detail, candidateBinding)?.result)?.id
+        return { message, candidateDraftId }
+      })
+      .filter(candidate => candidate.candidateDraftId === requestedDraftId)
+      .sort((a, b) => Number(b.message.id) - Number(a.message.id))[0]
+    if (fallback?.message.tool_call_id) {
+      return { ...binding, toolCallId: String(fallback.message.tool_call_id) }
+    }
+  }
+  throw interactionError('App invocation is not available', 404)
 }
 
 export function validateModelContext(input: unknown): { content?: Array<{ type: 'text'; text: string }>; structuredContent?: Record<string, unknown> } {
@@ -61,4 +122,16 @@ export function validateModelContext(input: unknown): { content?: Array<{ type: 
     throw interactionError('Only text model context is supported')
   }
   return parsed.data as ReturnType<typeof validateModelContext>
+}
+
+export function validateMcpAppMessage(input: unknown): string {
+  const parsed = McpUiMessageRequestSchema.shape.params.safeParse(input)
+  if (!parsed.success || parsed.data.role !== 'user' || parsed.data.content.length !== 1) {
+    throw interactionError('Invalid App message')
+  }
+  const block = parsed.data.content[0]
+  if (block.type !== 'text') throw interactionError('Only one text App message is supported')
+  const message = block.text.trim()
+  if (!message || message.length > 4096) throw interactionError('App message exceeds 4096 characters', 413)
+  return message
 }

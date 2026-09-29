@@ -1413,6 +1413,7 @@ export const useChatStore = defineStore('chat', () => {
   let loadSessionsRequestSequence = 0
   let switchSessionRequestSequence = 0
   let activeSelectionSequence = 0
+  const RESUME_TIMEOUT_MS = 8_000
   const reasoningEffortWriteChains = new Map<string, Promise<boolean>>()
   const reasoningEffortWriteTargets = new Map<string, string | undefined>()
   const reasoningEffortConfirmedValues = new Map<string, string | undefined>()
@@ -1955,12 +1956,17 @@ export const useChatStore = defineStore('chat', () => {
 
     beginMessageLoad(sessionId, requestSequence)
     let backgroundPendingOnResume = 0
+    let resumeTimedOut = false
 
     try {
       // Load messages via Socket.IO resume (server loads from DB if not in memory)
       await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('resume timeout')), 15_000)
+        const timeout = setTimeout(() => {
+          resumeTimedOut = true
+          reject(new Error('resume timeout'))
+        }, RESUME_TIMEOUT_MS)
         resumeSession(sessionId, (data) => {
+          if (resumeTimedOut) return
           clearTimeout(timeout)
           if (
             data.session_id !== sessionId
@@ -2111,7 +2117,14 @@ export const useChatStore = defineStore('chat', () => {
         }, activeSession.value?.profile, runtimeTransport())
       })
     } catch (err) {
-      console.error('Failed to load session messages via resume:', err)
+      const timedOut = resumeTimedOut || (err instanceof Error && err.message === 'resume timeout')
+      let recovered = false
+      if (timedOut && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
+        // Socket resume can race a reconnect or a bridge status check. Keep the
+        // current App/message tree mounted and recover the persisted page over HTTP.
+        recovered = await refreshActiveSession()
+      }
+      if (!recovered) console.error('Failed to load session messages via resume:', err)
     } finally {
       endMessageLoad(sessionId, requestSequence)
     }

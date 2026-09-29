@@ -38,9 +38,9 @@ def call_app_tool(server, req, profile, servers, lock, run, prefix, jsonable):
             return failure("mcp_app_tool_forbidden", "Tool is not available to this App")
         meta = jsonable(server._mcp_field(tool, "meta", "_meta") or {})
         ui = meta.get("ui") or {}
+        annotations = server._mcp_json_object(server._mcp_field(tool, "annotations") or {})
         if "app" not in ui.get("visibility", ["model", "app"]):
             return failure("mcp_app_tool_forbidden", "Tool is not visible to Apps")
-        annotations = server._mcp_json_object(server._mcp_field(tool, "annotations") or {})
         if not (annotations.get("readOnlyHint") is True or (
             annotations.get("destructiveHint") is False and annotations.get("openWorldHint") is False
         )):

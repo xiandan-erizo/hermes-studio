@@ -80,6 +80,44 @@ describe('MCP App tool results', () => {
     }
   })
 
+  it('keeps one current App for repeated renders of the same draft', () => {
+    const draft = (version: number) => ({ draft_id: 'dr_test', version, status: 'draft', extracted_fields: { impact_scope: version === 2 ? '3人' : '10人' } })
+    const message = (id: string, version: number): Message => ({
+      id,
+      role: 'tool',
+      content: '',
+      timestamp: version,
+      toolName: 'mcp__ticket__render_ticket_card',
+      toolCallId: `call-${id}`,
+      toolArgs: { action: 'prepare', result: { draft: draft(version) } },
+      toolResult: { structuredContent: { kind: 'draft', facts: [{ label: '影响范围', value: draft(version).extracted_fields.impact_scope }] }, content: [] },
+      toolStatus: 'done',
+    })
+
+    const rows = includeMcpAppResults([message('v2', 2), message('v3', 3)])
+
+    expect(rows.map(row => row.id)).toEqual(['v2', 'mcp-app:v2', 'v3'])
+    expect(rows[1].mcpApp?.toolCallId).toBe('call-v2')
+    expect(rows[1].mcpApp?.toolResult.structuredContent).toMatchObject({ facts: [{ label: '影响范围', value: '10人' }] })
+  })
+
+  it('prefers the higher draft version over a later stale render', () => {
+    const draft = (version: number) => ({ draft_id: 'dr_test', version, status: 'draft', extracted_fields: { impact_scope: `${version}人` } })
+    const rendered = (id: string, version: number, impact: string): Message => ({
+      id, role: 'tool', content: '', timestamp: version, toolStatus: 'done',
+      toolName: 'mcp__ticket__render_ticket_card', toolCallId: `call-${id}`,
+      toolArgs: { action: 'prepare', result: { draft: draft(version) } },
+      toolResult: { structuredContent: { kind: 'draft', facts: [{ label: '影响范围', value: impact }] }, content: [] },
+    })
+    const refreshed = rendered('v4', 4, '12人')
+
+    const rows = includeMcpAppResults([refreshed, rendered('v3', 3, '10人')])
+
+    expect(rows.map(row => row.id)).toEqual(['v4', 'mcp-app:v4', 'v3'])
+    expect(rows[1].mcpApp?.presentationVersion).toBe(4)
+    expect(rows[1].mcpApp?.toolResult.structuredContent).toMatchObject({ facts: [{ label: '影响范围', value: '12人' }] })
+  })
+
   it('preserves metadata and JSON-looking text in Hermes content-only results', () => {
     for (const result of ['Ticket ready', '{"ticketId":"T-7"}']) {
       expect(normalizeMcpCallToolResult({ result, _meta: { viewState: { id: 7 } } })).toEqual({

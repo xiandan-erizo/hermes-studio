@@ -107,6 +107,24 @@ const chatInputRef = ref<(InstanceType<typeof ChatInput> & {
 }) | null>(null);
 const chatContentWrapperRef = ref<HTMLElement | null>(null);
 const chatMainContentRef = ref<HTMLElement | null>(null);
+let observedMcpAppComposer: HTMLElement | null = null;
+let mcpAppComposerResizeObserver: ResizeObserver | null = null;
+
+function updateMcpAppComposerClearance() {
+  const surface = chatMainContentRef.value;
+  if (!surface || !observedMcpAppComposer) return;
+  const clearance = Math.max(0, window.innerHeight - observedMcpAppComposer.getBoundingClientRect().top + 12);
+  surface.style.setProperty("--mcp-app-composer-clearance", `${Math.ceil(clearance)}px`);
+}
+
+watch(() => chatInputRef.value?.$el, (element) => {
+  mcpAppComposerResizeObserver?.disconnect();
+  observedMcpAppComposer = element instanceof HTMLElement ? element : null;
+  if (!observedMcpAppComposer) return;
+  mcpAppComposerResizeObserver ??= new ResizeObserver(updateMcpAppComposerClearance);
+  mcpAppComposerResizeObserver.observe(observedMcpAppComposer);
+  updateMcpAppComposerClearance();
+}, { flush: "post" });
 let sessionFadeAnimation: Animation | null = null;
 const chatDropCounter = ref(0);
 const isChatDropActive = ref(false);
@@ -452,6 +470,9 @@ onMounted(() => {
   window.addEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.addEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.addEventListener("resize", handleToolPanelViewportResize);
+  window.addEventListener("resize", updateMcpAppComposerClearance);
+  window.visualViewport?.addEventListener("resize", updateMcpAppComposerClearance);
+  window.visualViewport?.addEventListener("scroll", updateMcpAppComposerClearance);
   handleToolPanelViewportResize();
   if (profilesStore.profiles.length === 0) {
     void profilesStore.fetchProfiles();
@@ -499,6 +520,10 @@ onUnmounted(() => {
   window.removeEventListener(OPEN_DESKTOP_BROWSER_PANEL_EVENT, handleOpenDesktopBrowserPanelRequest);
   window.removeEventListener(OPEN_SUBAGENT_STREAM_EVENT, handleOpenSubagentStreamRequest);
   window.removeEventListener("resize", handleToolPanelViewportResize);
+  window.removeEventListener("resize", updateMcpAppComposerClearance);
+  window.visualViewport?.removeEventListener("resize", updateMcpAppComposerClearance);
+  window.visualViewport?.removeEventListener("scroll", updateMcpAppComposerClearance);
+  mcpAppComposerResizeObserver?.disconnect();
   stopToolResize();
   sessionFadeAnimation?.cancel();
   if (filesStore.previewFile?.workspaceSessionId) filesStore.closePreview();

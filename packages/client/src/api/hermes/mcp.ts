@@ -20,6 +20,12 @@ export function updateMcpAppModelContext(binding: McpAppBinding, params: { conte
   })
 }
 
+export function validateMcpAppMessage(binding: McpAppBinding, params: unknown): Promise<{ message: string }> {
+  return request('/api/hermes/mcp/apps/message', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...binding, params }),
+  })
+}
+
 export interface McpServerInfo {
   name: string
   transport: 'stdio' | 'http' | 'sse'

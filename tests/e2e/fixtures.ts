@@ -1039,6 +1039,9 @@ function makeSocket(url, options) {
       onceListeners.delete(event)
       for (const handler of handlers) handler(payload)
     },
+    __listenerCount(event) {
+      return (listeners.get(event) || []).length
+    },
   }
   state.allSockets = state.allSockets || []
   state.allSockets.push(socket)

@@ -6,6 +6,8 @@ export interface McpAppInvocation {
   toolCallId?: string
   toolArgs: Record<string, unknown>
   toolResult: CallToolResult
+  draftId?: string
+  presentationVersion?: number
 }
 
 const MAX_WRAPPER_DEPTH = 6
@@ -103,18 +105,56 @@ function mcpAppInvocation(message: Message): McpAppInvocation | null {
   }
 }
 
+function ticketDraftId(invocation: McpAppInvocation): string | null {
+  if (!invocation.toolName.endsWith('__render_ticket_card') || invocation.toolArgs.action !== 'prepare') return null
+  const result = record(invocation.toolArgs.result)
+  const envelope = record(result?.data) || result
+  const draft = record(envelope?.draft)
+  return draft?.status === 'draft' && typeof draft.draft_id === 'string'
+    && record(invocation.toolResult.structuredContent)?.kind === 'draft'
+    ? draft.draft_id : null
+}
+
+function ticketDraftVersion(invocation: McpAppInvocation): number {
+  const edit = record(invocation.toolResult._meta?.ticketEdit)
+  const result = record(invocation.toolArgs.result)
+  const envelope = record(result?.data) || result
+  const draft = record(envelope?.draft)
+  const version = edit?.version ?? draft?.version
+  return typeof version === 'number' && Number.isSafeInteger(version) ? version : 0
+}
+
 /** Presentation rows are derived from persisted MCP calls and never enter model history. */
 export function includeMcpAppResults(messages: Message[]): Message[] {
-  return messages.flatMap(message => {
-    const invocation = mcpAppInvocation(message)
+  const invocations = messages.map(mcpAppInvocation)
+  const latestByDraft = new Map<string, { invocation: McpAppInvocation; version: number }>()
+  invocations.forEach(invocation => {
+    if (!invocation) return
+    const draftId = ticketDraftId(invocation)
+    if (!draftId) return
+    const version = ticketDraftVersion(invocation)
+    if (version >= (latestByDraft.get(draftId)?.version ?? -1)) latestByDraft.set(draftId, { invocation, version })
+  })
+  const projectedDrafts = new Set<string>()
+  return messages.flatMap((message, index) => {
+    const invocation = invocations[index]
     if (!invocation) return [message]
+    const draftId = ticketDraftId(invocation)
+    if (draftId && projectedDrafts.has(draftId)) return [message]
+    if (draftId) projectedDrafts.add(draftId)
+    const latestResult = draftId ? latestByDraft.get(draftId)?.invocation.toolResult : undefined
     return [message, {
       id: `mcp-app:${message.id}`,
       role: 'system',
       systemType: 'mcp-app',
       content: '',
       timestamp: message.timestamp,
-      mcpApp: invocation,
+      mcpApp: draftId ? {
+        ...invocation,
+        draftId,
+        presentationVersion: latestByDraft.get(draftId)?.version,
+        toolResult: latestResult || invocation.toolResult,
+      } : invocation,
     } satisfies Message]
   })
 }

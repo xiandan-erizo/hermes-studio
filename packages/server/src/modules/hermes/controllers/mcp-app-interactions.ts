@@ -1,6 +1,6 @@
 import type { Context } from 'koa'
 import { getBridgeClient, bridgeMcpAction } from '../services/mcp/bridge-actions'
-import { interactionError, requireMcpAppInvocation, saveMcpAppContext, validateModelContext } from '../../studio/public/mcp-apps'
+import { interactionError, requireMcpAppInvocation, saveMcpAppContext, validateMcpAppMessage, validateModelContext } from '../../studio/public/mcp-apps'
 
 function fail(ctx: Context, error: unknown): void {
   const err = error as { status?: number; response?: { code?: string }; message?: string }
@@ -36,5 +36,15 @@ export async function updateAppModelContext(ctx: Context): Promise<void> {
     await bridgeMcpAction('mcp_app_resolve', { toolName: binding.toolName }, profile)
     saveMcpAppContext(profile!, binding, context)
     ctx.body = {}
+  } catch (error) { fail(ctx, error) }
+}
+
+export async function validateAppMessage(ctx: Context): Promise<void> {
+  try {
+    const body = (ctx.request.body || {}) as Record<string, unknown>
+    const profile = ctx.state.profile?.name
+    const binding = requireMcpAppInvocation(ctx.state.user, profile, body)
+    await bridgeMcpAction('mcp_app_resolve', { toolName: binding.toolName }, profile)
+    ctx.body = { message: validateMcpAppMessage(body.params) }
   } catch (error) { fail(ctx, error) }
 }
