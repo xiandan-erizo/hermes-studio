@@ -111,7 +111,7 @@ describe('chat-run socket reconnect handling', () => {
     expect(onError).not.toHaveBeenCalled()
 
     socket.__trigger('connect')
-    expect(socket.emit).toHaveBeenCalledWith('resume', { session_id: 'session-1', profile: 'default' })
+    expect(socket.emit).toHaveBeenCalledWith('resume', expect.objectContaining({ session_id: 'session-1', profile: 'default', request_id: expect.any(String) }))
 
     const resumed = { session_id: 'session-1', messages: [], isWorking: true, events: [] }
     socket.__trigger('resumed', resumed)
@@ -155,6 +155,32 @@ describe('chat-run socket reconnect handling', () => {
 
     expect(onSessionA).toHaveBeenCalledWith(resumedA)
     expect(socket.__listenerCount('resumed')).toBe(0)
+  })
+
+  it('matches repeated resumes of the same session to their own request', async () => {
+    const { resumeSession } = await import('../../packages/client/src/api/studio/chat')
+    const oldA = vi.fn()
+    const currentA = vi.fn()
+    const sessionB = vi.fn()
+    resumeSession('session-a', oldA, 'default')
+    resumeSession('session-b', sessionB, 'default')
+    resumeSession('session-a', currentA, 'default')
+
+    const socket = socketState.sockets[0]
+    const requests = socket.emit.mock.calls.filter((call: any[]) => call[0] === 'resume').map((call: any[]) => call[1])
+    const oldResponse = { session_id: 'session-a', request_id: requests[0].request_id || 'old-request', messages: [], isWorking: false, events: [] }
+    socket.__trigger('resumed', oldResponse)
+    expect(oldA).toHaveBeenCalledWith(oldResponse)
+    expect(currentA).not.toHaveBeenCalled()
+    expect(sessionB).not.toHaveBeenCalled()
+
+    expect(requests[0].request_id).toEqual(expect.any(String))
+    expect(new Set(requests.map((request: any) => request.request_id)).size).toBe(3)
+    const freshResponse = { ...oldResponse, request_id: requests[2].request_id, isWorking: true }
+    socket.__trigger('resumed', freshResponse)
+    expect(currentA).toHaveBeenCalledWith(freshResponse)
+    expect(oldA).toHaveBeenCalledOnce()
+    expect(socket.__listenerCount('resumed')).toBe(1)
   })
 
   it('keeps fatal disconnects fatal and removes per-run listeners', async () => {

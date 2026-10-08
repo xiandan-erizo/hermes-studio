@@ -1,3 +1,7 @@
+<script lang="ts">
+let nextAppInstance = 0
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -12,7 +16,6 @@ import { claimMcpAppPip } from '@/utils/hermes/mcp-app-pip'
 import { traceMcpApp, type McpAppDiagnosticFields } from '@/utils/hermes/mcp-app-diagnostics'
 import { useChatStore } from '@/stores/hermes/chat'
 
-let nextAppInstance = 0
 const props = defineProps<{ invocation: McpAppInvocation; profile?: string; sessionId?: string }>()
 const instanceId = `app-${++nextAppInstance}`
 const { t, locale } = useI18n()

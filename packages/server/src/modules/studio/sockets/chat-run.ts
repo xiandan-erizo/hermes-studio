@@ -711,8 +711,14 @@ export class ChatRunSocket {
         data.queue_id, data.session_id, state.queue.length)
     })
 
-    socket.on('resume', async (data: { session_id?: string }) => {
+    socket.on('resume', async (data: { session_id?: string; request_id?: string }) => {
       if (!data.session_id) return
+      if (data.request_id !== undefined && (
+        typeof data.request_id !== 'string'
+        || data.request_id.length === 0
+        || data.request_id.length > 128
+        || /[\x00-\x1f\x7f-\x9f]/.test(data.request_id)
+      )) return
       const sid = data.session_id
       try {
         requireSocketSessionAccess(sid)
@@ -725,7 +731,7 @@ export class ChatRunSocket {
         return
       }
       socket.join(`session:${sid}`)
-      await this.resumeSession(socket, sid)
+      await this.resumeSession(socket, sid, undefined, data.request_id)
     })
 
     socket.on('app.resume', async (data: { session_id?: string; id?: string }) => {
@@ -1411,6 +1417,7 @@ export class ChatRunSocket {
     socket: Socket,
     sid: string,
     options?: { event: 'app.resumed'; cachedId: string },
+    requestId?: string,
   ) {
     // Channel conversations are state.db snapshots; refresh before loading so
     // turns that arrived on the channel after import are visible here.
@@ -1458,6 +1465,7 @@ export class ChatRunSocket {
     const outboundMessagePage = appMessagePage || resumePage
     socket.emit(options?.event || 'resumed', {
       session_id: sid,
+      ...(requestId !== undefined ? { request_id: requestId } : {}),
       ...outboundMessagePage,
       parentSessionId: sessionDetail?.parent_session_id || null,
       forkPointMessageId: sessionDetail?.fork_point_message_id || null,

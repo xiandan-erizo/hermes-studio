@@ -16,6 +16,22 @@ const structuredContent = {
   title: 'Ticket created',
 }
 
+function draftMessage(id: string, toolName: string, draftId: string, version: number): Message {
+  return {
+    id, role: 'tool', content: '', timestamp: version, toolStatus: 'done',
+    toolName, toolCallId: `call-${id}`,
+    toolArgs: { action: 'prepare', result: { draft: { draft_id: draftId, version, status: 'draft' } } },
+    toolResult: {
+      content: [],
+      structuredContent: { kind: 'draft', title: id },
+      _meta: {
+        ui: { resourceUri: `ui://${id}/card.html` },
+        ticketEdit: { version, editToken: `fake-${id}-token` },
+      },
+    },
+  }
+}
+
 describe('MCP App tool results', () => {
   it('normalizes Hermes MCP output wrappers into a standard CallToolResult', () => {
     const raw = JSON.stringify({
@@ -80,6 +96,73 @@ describe('MCP App tool results', () => {
     }
   })
 
+  it.each([
+    ['different MCP servers', 'mcp__beta__render_ticket_card'],
+    ['different tools on one MCP server', 'mcp__alpha__nested__render_ticket_card'],
+  ])('keeps shared draft IDs and private results separate for %s', (_, secondToolName) => {
+    const rows = includeMcpAppResults([
+      draftMessage('alpha-v2', 'mcp__alpha__render_ticket_card', 'dr_shared', 2),
+      draftMessage('other-v7', secondToolName, 'dr_shared', 7),
+      draftMessage('alpha-v3', 'mcp__alpha__render_ticket_card', 'dr_shared', 3),
+    ])
+
+    expect(rows.filter(row => row.systemType === 'mcp-app')).toMatchObject([
+      {
+        id: 'mcp-app:alpha-v2',
+        mcpApp: {
+          toolName: 'mcp__alpha__render_ticket_card', toolCallId: 'call-alpha-v2',
+          draftId: 'dr_shared', presentationVersion: 3,
+          toolArgs: { result: { draft: { version: 2 } } },
+          toolResult: {
+            structuredContent: { kind: 'draft', title: 'alpha-v3' },
+            _meta: {
+              ui: { resourceUri: 'ui://alpha-v3/card.html' },
+              ticketEdit: { version: 3, editToken: 'fake-alpha-v3-token' },
+            },
+          },
+        },
+      },
+      {
+        id: 'mcp-app:other-v7',
+        mcpApp: {
+          toolName: secondToolName, toolCallId: 'call-other-v7',
+          draftId: 'dr_shared', presentationVersion: 7,
+          toolResult: {
+            structuredContent: { kind: 'draft', title: 'other-v7' },
+            _meta: {
+              ui: { resourceUri: 'ui://other-v7/card.html' },
+              ticketEdit: { version: 7, editToken: 'fake-other-v7-token' },
+            },
+          },
+        },
+      },
+    ])
+  })
+
+  it('keeps different drafts from the same MCP tool separate', () => {
+    const rows = includeMcpAppResults([
+      draftMessage('first', 'mcp__alpha__render_ticket_card', 'dr_first', 2),
+      draftMessage('second', 'mcp__alpha__render_ticket_card', 'dr_second', 3),
+    ])
+
+    expect(rows.filter(row => row.systemType === 'mcp-app')).toMatchObject([
+      { id: 'mcp-app:first', mcpApp: { draftId: 'dr_first', toolResult: { _meta: { ticketEdit: { editToken: 'fake-first-token' } } } } },
+      { id: 'mcp-app:second', mcpApp: { draftId: 'dr_second', toolResult: { _meta: { ticketEdit: { editToken: 'fake-second-token' } } } } },
+    ])
+  })
+
+  it('keeps tool and draft identities separate when they contain delimiters', () => {
+    const rows = includeMcpAppResults([
+      draftMessage('first', 'mcp__alpha__render_ticket_card', 'dr_first:mcp__beta__render_ticket_card:dr_second', 2),
+      draftMessage('second', 'mcp__alpha__render_ticket_card:dr_first:mcp__beta__render_ticket_card', 'dr_second', 3),
+    ])
+
+    expect(rows.filter(row => row.systemType === 'mcp-app')).toMatchObject([
+      { id: 'mcp-app:first', mcpApp: { toolName: 'mcp__alpha__render_ticket_card', toolResult: { structuredContent: { title: 'first' } } } },
+      { id: 'mcp-app:second', mcpApp: { toolName: 'mcp__alpha__render_ticket_card:dr_first:mcp__beta__render_ticket_card', toolResult: { structuredContent: { title: 'second' } } } },
+    ])
+  })
+
   it('keeps one current App for repeated renders of the same draft', () => {
     const draft = (version: number) => ({ draft_id: 'dr_test', version, status: 'draft', extracted_fields: { impact_scope: version === 2 ? '3人' : '10人' } })
     const message = (id: string, version: number): Message => ({
@@ -99,6 +182,19 @@ describe('MCP App tool results', () => {
     expect(rows.map(row => row.id)).toEqual(['v2', 'mcp-app:v2', 'v3'])
     expect(rows[1].mcpApp?.toolCallId).toBe('call-v2')
     expect(rows[1].mcpApp?.toolResult.structuredContent).toMatchObject({ facts: [{ label: '影响范围', value: '10人' }] })
+  })
+
+  it('refreshes same-version private metadata without changing the oldest App binding', () => {
+    const rows = includeMcpAppResults([
+      draftMessage('expired', 'mcp__alpha__render_ticket_card', 'dr_shared', 3),
+      draftMessage('fresh', 'mcp__alpha__render_ticket_card', 'dr_shared', 3),
+    ])
+
+    expect(rows.map(row => row.id)).toEqual(['expired', 'mcp-app:expired', 'fresh'])
+    expect(rows[1].mcpApp).toMatchObject({
+      toolCallId: 'call-expired', presentationVersion: 3,
+      toolResult: { _meta: { ticketEdit: { version: 3, editToken: 'fake-fresh-token' } } },
+    })
   })
 
   it('prefers the higher draft version over a later stale render', () => {

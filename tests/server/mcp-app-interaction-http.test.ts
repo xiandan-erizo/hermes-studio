@@ -27,7 +27,7 @@ beforeEach(async () => {
   app.use(bodyParser())
   app.use(async (ctx, next) => {
     ctx.state.user = { id: ctx.get('x-other-user') ? 8 : 7, username: 'member', role: 'user' }
-    ctx.state.profile = { name: 'work' }
+    ctx.state.profile = { name: ctx.get('x-other-profile') ? 'other' : 'work' }
     await next()
   })
   app.use(mcpAppRoutes.routes())
@@ -39,8 +39,12 @@ afterEach(async () => {
   await new Promise<void>(resolve => server.close(() => resolve()))
   fixture.db.close()
 })
-function post(path: string, body: unknown, otherUser = false) {
-  return fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(otherUser ? { 'x-other-user': '1' } : {}) }, body: JSON.stringify(body) })
+function post(path: string, body: unknown, otherUser = false, otherProfile = false) {
+  return fetch(url + path, { method: 'POST', headers: { 'content-type': 'application/json', ...(otherUser ? { 'x-other-user': '1' } : {}), ...(otherProfile ? { 'x-other-profile': '1' } : {}) }, body: JSON.stringify(body) })
+}
+function addInvocation(toolCallId: string, toolName: string, results: string[]) {
+  addMessage({ session_id: 's1', role: 'assistant', content: '', tool_calls: [{ id: toolCallId, function: { name: toolName, arguments: JSON.stringify({ result: { draft: { draft_id: 'draft-1', version: 1 } } }) } }] })
+  for (const content of results) addMessage({ session_id: 's1', role: 'tool', tool_call_id: toolCallId, tool_name: toolName, content })
 }
 
 it('allows an owned App call and rejects cross-user, missing invocation and transport metadata', async () => {
@@ -50,9 +54,56 @@ it('allows an owned App call and rejects cross-user, missing invocation and tran
   expect(await response.json()).toEqual({ content: [], structuredContent: { version: 2 } })
   expect(fixture.call).toHaveBeenCalledWith(binding.toolName, 'update', { version: 1 }, 'work')
   expect((await post('call-tool', body, true)).status).toBe(404)
+  expect((await post('call-tool', body, false, true)).status).toBe(404)
   expect((await post('call-tool', { ...body, toolCallId: 'foreign' })).status).toBe(404)
   expect((await post('call-tool', { ...body, params: { ...body.params, _meta: { credentials: 'forged' } } })).status).toBe(400)
   expect(fixture.call).toHaveBeenCalledTimes(1)
+})
+
+it.each([
+  { state: 'pending source', sourceName: binding.toolName, sourceResults: [], candidateDuplicate: undefined },
+  { state: 'failed source', sourceName: binding.toolName, sourceResults: ['{"isError":true,"content":[]}'], candidateDuplicate: undefined },
+  { state: 'wrong-name source', sourceName: 'mcp__other__render', sourceResults: ['{"content":[]}'], candidateDuplicate: undefined },
+  { state: 'duplicate successful source', sourceName: binding.toolName, sourceResults: ['{"content":[]}', '{"content":[]}'], candidateDuplicate: undefined },
+  { state: 'duplicate success/failure source', sourceName: binding.toolName, sourceResults: ['{"content":[]}', '{"isError":true,"content":[]}'], candidateDuplicate: undefined },
+  { state: 'duplicate successful candidate', sourceName: binding.toolName, sourceResults: [], candidateDuplicate: '{"content":[]}' },
+  { state: 'duplicate success/failure candidate', sourceName: binding.toolName, sourceResults: [], candidateDuplicate: '{"isError":true,"content":[]}' },
+])('rejects $state at every interaction endpoint without changing the candidate context', async ({ sourceName, sourceResults, candidateDuplicate }) => {
+  const source = { ...binding, toolCallId: 'call-origin' }
+  const candidate = { ...binding, toolCallId: 'call-new' }
+  addInvocation(source.toolCallId, sourceName, sourceResults)
+  addInvocation(candidate.toolCallId, binding.toolName, ['{"content":[]}'])
+  expect((await post('model-context', { ...candidate, params: { structuredContent: { view: 'candidate snapshot' } } })).status).toBe(200)
+  if (candidateDuplicate) addMessage({ session_id: 's1', role: 'tool', tool_call_id: candidate.toolCallId, tool_name: binding.toolName, content: candidateDuplicate })
+  fixture.resolve.mockClear()
+
+  for (const [path, params] of [
+    ['call-tool', { name: 'update', arguments: { version: 1 } }],
+    ['model-context', { structuredContent: { view: 'unauthorized replacement' } }],
+    ['message', { role: 'user', content: [{ type: 'text', text: 'continue' }] }],
+  ] as const) {
+    const response = await post(path, { ...source, params })
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ error: 'App invocation is not available' })
+    expect((await post(path, { ...source, params }, true)).status).toBe(404)
+    expect((await post(path, { ...source, params }, false, true)).status).toBe(404)
+  }
+  expect(mcpAppContextPrompt('s1', 'work')).toContain('candidate snapshot')
+  expect(mcpAppContextPrompt('s1', 'work')).not.toContain('unauthorized replacement')
+  expect(fixture.call).not.toHaveBeenCalled()
+  expect(fixture.resolve).not.toHaveBeenCalled()
+})
+
+it('keeps context snapshots for older and newer successful calls separate', async () => {
+  addMessage({ session_id: 's1', role: 'assistant', content: '', tool_calls: [{ id: 'call1', function: { name: binding.toolName, arguments: JSON.stringify({ result: { draft: { draft_id: 'draft-1', version: 1 } } }) } }] })
+  addInvocation('call-new', binding.toolName, ['{"content":[]}'])
+  for (const [toolCallId, view] of [['call1', 'older view'], ['call-new', 'newer view'], ['call1', 'older view updated']]) {
+    expect((await post('model-context', { ...binding, toolCallId, params: { structuredContent: { view } } })).status).toBe(200)
+  }
+  expect(mcpAppContextPrompt('s1', 'work')).toContain('older view updated')
+  expect(mcpAppContextPrompt('s1', 'work')).toContain('newer view')
+  expect(mcpAppContextPrompt('s1', 'work')).not.toContain('"view":"older view"')
+  expect(fixture.call).not.toHaveBeenCalled()
 })
 
 it('stores only the latest standard context without executing a tool or run', async () => {

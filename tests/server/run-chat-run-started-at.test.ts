@@ -226,3 +226,94 @@ describe('ChatRunSocket reports when the run started', () => {
   })
 
 })
+
+describe('ChatRunSocket resume request correlation', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    bridgeMock.statusIfLoaded.mockReset().mockResolvedValue({ running: false })
+  })
+
+  async function makeResumeHarness(user = { id: 1, username: 'admin', role: 'super_admin' }) {
+    const { ChatRunSocket } = await import('../../packages/server/src/modules/studio/sockets/chat-run')
+    const { handlers, io, socket } = makeServerHarness()
+    ;(socket.data as any).user = user
+    const server = new ChatRunSocket(io as any)
+    for (const sessionId of ['sA', 'sB']) {
+      ;(server as any).sessionMap.set(sessionId, { messages: [], events: [], queue: [], isWorking: false, profile: 'default', source: 'cli' })
+    }
+    ;(server as any).onConnection(socket)
+    socket.emit.mockClear()
+    return { handlers, socket }
+  }
+
+  it('preserves each request ID when A to B to A status queries finish out of order', async () => {
+    const { handlers, socket } = await makeResumeHarness()
+    const pendingStatus: Array<(value: { running: boolean }) => void> = []
+    bridgeMock.statusIfLoaded.mockImplementation(() => new Promise(resolve => pendingStatus.push(resolve)))
+    const resume = handlers.get('resume')!
+    const oldA = resume({ session_id: 'sA', request_id: 'old-A' })
+    const b = resume({ session_id: 'sB', request_id: 'B' })
+    const newA = resume({ session_id: 'sA', request_id: 'new-A' })
+    expect(socket.emit.mock.calls.filter(([event]) => event === 'resumed')).toEqual([])
+
+    pendingStatus[1]({ running: false })
+    await b
+    pendingStatus[2]({ running: false })
+    await newA
+    pendingStatus[0]({ running: false })
+    await oldA
+
+    expect(socket.emit.mock.calls.filter(([event]) => event === 'resumed').map(([, payload]) => ({ session_id: payload.session_id, request_id: payload.request_id }))).toEqual([
+      { session_id: 'sB', request_id: 'B' },
+      { session_id: 'sA', request_id: 'new-A' },
+      { session_id: 'sA', request_id: 'old-A' },
+    ])
+  })
+
+  it.each(['a', 'r'.repeat(128), '  request  '])('echoes a valid request ID exactly: %s', async requestId => {
+    const { handlers, socket } = await makeResumeHarness()
+    await handlers.get('resume')!({ session_id: 'sA', request_id: requestId })
+    expect(socket.emit.mock.calls.find(([event]) => event === 'resumed')?.[1]).toMatchObject({ session_id: 'sA', request_id: requestId })
+  })
+
+  it.each(['', 'r'.repeat(129), null, 7, {}, 'line\nbreak', 'nul\u0000byte', 'delete\u007f', 'control\u0085'])('rejects an invalid supplied request ID: %j', async requestId => {
+    const { handlers, socket } = await makeResumeHarness()
+    await handlers.get('resume')!({ session_id: 'sA', request_id: requestId })
+    expect(socket.emit.mock.calls.filter(([event]) => event === 'resumed')).toEqual([])
+    expect(bridgeMock.statusIfLoaded).not.toHaveBeenCalled()
+  })
+
+  it('keeps ordinary resume callers without an ID unchanged', async () => {
+    const { handlers, socket } = await makeResumeHarness()
+    await handlers.get('resume')!({ session_id: 'sA' })
+    const payload = socket.emit.mock.calls.find(([event]) => event === 'resumed')?.[1]
+    expect(payload).toMatchObject({ session_id: 'sA', isWorking: false, messages: [] })
+    expect(payload).not.toHaveProperty('request_id')
+  })
+
+  it('keeps the app.resume message-cache ID protocol separate', async () => {
+    const { handlers, socket } = await makeResumeHarness()
+    await handlers.get('app.resume')!({ session_id: 'sA', id: '', request_id: 'unused' })
+    const fullPage = socket.emit.mock.calls.find(([event]) => event === 'app.resumed')?.[1]
+    expect(fullPage).toMatchObject({ session_id: 'sA', messagesCached: false, messages: [] })
+    expect(fullPage).not.toHaveProperty('request_id')
+    socket.emit.mockClear()
+    await handlers.get('app.resume')!({ session_id: 'sA', id: fullPage.id })
+    const cachedPage = socket.emit.mock.calls.find(([event]) => event === 'app.resumed')?.[1]
+    expect(cachedPage).toMatchObject({ id: fullPage.id, messagesCached: true })
+    expect(cachedPage).not.toHaveProperty('messages')
+    expect(cachedPage).not.toHaveProperty('request_id')
+  })
+
+  it.each([
+    { reason: 'ownership', profile: 'default', owner_user_id: 2 },
+    { reason: 'profile', profile: 'research', owner_user_id: 1 },
+  ])('still rejects session access denied by $reason with a valid request ID', async ({ profile, owner_user_id }) => {
+    const { handlers, socket } = await makeResumeHarness({ id: 1, username: 'member', role: 'user' })
+    getSessionMock.mockReturnValueOnce({ id: 'sA', profile, source: 'cli', owner_user_id } as any)
+    await handlers.get('resume')!({ session_id: 'sA', request_id: 'authorized-correlation-format' })
+    expect(socket.emit.mock.calls.filter(([event]) => event === 'resumed')).toEqual([])
+    expect(socket.emit.mock.calls.find(([event]) => event === 'run.failed')?.[1]).toMatchObject({ session_id: 'sA' })
+    expect(bridgeMock.statusIfLoaded).not.toHaveBeenCalled()
+  })
+})

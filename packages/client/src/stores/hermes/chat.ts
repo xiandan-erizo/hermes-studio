@@ -1836,7 +1836,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Re-pull active session from server. Used on tab-visible events.
-  async function refreshActiveSession(): Promise<boolean> {
+  async function refreshActiveSession(shouldApply: () => boolean = () => true): Promise<boolean> {
     const sid = activeSessionId.value
     if (!sid) return false
     try {
@@ -1847,7 +1847,7 @@ export const useChatStore = defineStore('chat', () => {
         LIVE_CHAT_MAX_LOADED_MESSAGES,
       )
       const detail = await fetchSessionMessagesPage(sid, 0, limit, activeSession.value?.profile)
-      if (!detail) return false
+      if (!detail || !shouldApply()) return false
       const mapped = mapHermesMessages(detail.messages || [])
       target.messages = mapped
       restorePersistedSubagentStreams(sid)
@@ -1957,6 +1957,7 @@ export const useChatStore = defineStore('chat', () => {
     beginMessageLoad(sessionId, requestSequence)
     let backgroundPendingOnResume = 0
     let resumeTimedOut = false
+    let resumeReceived = false
 
     try {
       // Load messages via Socket.IO resume (server loads from DB if not in memory)
@@ -1966,7 +1967,7 @@ export const useChatStore = defineStore('chat', () => {
           reject(new Error('resume timeout'))
         }, RESUME_TIMEOUT_MS)
         resumeSession(sessionId, (data) => {
-          if (resumeTimedOut) return
+          if (resumeReceived) return
           clearTimeout(timeout)
           if (
             data.session_id !== sessionId
@@ -1981,6 +1982,7 @@ export const useChatStore = defineStore('chat', () => {
             resolve()
             return
           }
+          resumeReceived = true
           if (data.isWorking) {
             serverWorking.value.add(sessionId)
           } else {
@@ -2113,18 +2115,29 @@ export const useChatStore = defineStore('chat', () => {
               } as RunEvent)
             }
           }
+          // The history fallback may already have finished; a valid late resume
+          // must still attach live listeners and restore pending interactions.
+          if (resumeTimedOut) {
+            resumeServerWorkingRun(sessionId, backgroundPendingOnResume > 0, !serverWorking.value.has(sessionId))
+          }
           resolve()
         }, activeSession.value?.profile, runtimeTransport())
       })
     } catch (err) {
       const timedOut = resumeTimedOut || (err instanceof Error && err.message === 'resume timeout')
       let recovered = false
-      if (timedOut && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
+      if (timedOut && !resumeReceived && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
         // Socket resume can race a reconnect or a bridge status check. Keep the
         // current App/message tree mounted and recover the persisted page over HTTP.
-        recovered = await refreshActiveSession()
+        recovered = await refreshActiveSession(() => (
+          !resumeReceived
+          && activeSessionId.value === sessionId
+          && requestSequence === switchSessionRequestSequence
+        ))
       }
-      if (!recovered) console.error('Failed to load session messages via resume:', err)
+      if (!recovered && !resumeReceived && activeSessionId.value === sessionId && requestSequence === switchSessionRequestSequence) {
+        console.error('Failed to load session messages via resume:', err)
+      }
     } finally {
       endMessageLoad(sessionId, requestSequence)
     }

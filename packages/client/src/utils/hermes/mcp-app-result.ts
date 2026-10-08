@@ -132,17 +132,19 @@ export function includeMcpAppResults(messages: Message[]): Message[] {
     if (!invocation) return
     const draftId = ticketDraftId(invocation)
     if (!draftId) return
+    const draftKey = JSON.stringify([invocation.toolName, draftId])
     const version = ticketDraftVersion(invocation)
-    if (version >= (latestByDraft.get(draftId)?.version ?? -1)) latestByDraft.set(draftId, { invocation, version })
+    if (version >= (latestByDraft.get(draftKey)?.version ?? -1)) latestByDraft.set(draftKey, { invocation, version })
   })
   const projectedDrafts = new Set<string>()
   return messages.flatMap((message, index) => {
     const invocation = invocations[index]
     if (!invocation) return [message]
     const draftId = ticketDraftId(invocation)
-    if (draftId && projectedDrafts.has(draftId)) return [message]
-    if (draftId) projectedDrafts.add(draftId)
-    const latestResult = draftId ? latestByDraft.get(draftId)?.invocation.toolResult : undefined
+    const draftKey = draftId ? JSON.stringify([invocation.toolName, draftId]) : null
+    if (draftKey && projectedDrafts.has(draftKey)) return [message]
+    if (draftKey) projectedDrafts.add(draftKey)
+    const latest = draftKey ? latestByDraft.get(draftKey) : undefined
     return [message, {
       id: `mcp-app:${message.id}`,
       role: 'system',
@@ -152,8 +154,8 @@ export function includeMcpAppResults(messages: Message[]): Message[] {
       mcpApp: draftId ? {
         ...invocation,
         draftId,
-        presentationVersion: latestByDraft.get(draftId)?.version,
-        toolResult: latestResult || invocation.toolResult,
+        presentationVersion: latest?.version,
+        toolResult: latest?.invocation.toolResult || invocation.toolResult,
       } : invocation,
     } satisfies Message]
   })

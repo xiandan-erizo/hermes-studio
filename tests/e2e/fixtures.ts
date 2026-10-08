@@ -285,6 +285,11 @@ export async function mockHermesApi(page: Page, options: MockHermesApiOptions = 
       return
     }
 
+    if (pathname === '/api/auth/sso/status') {
+      await route.fulfill(jsonResponse({ enabled: false }))
+      return
+    }
+
     if (pathname === '/api/auth/login') {
       if (request.method() !== 'POST') {
         await route.fulfill(jsonResponse({ error: 'Method not allowed' }, 405))
@@ -1019,7 +1024,10 @@ function makeSocket(url, options) {
         const resumes = window.__PW_CHAT_SOCKET_RESUMES__ || {}
         const response = sessionId ? resumes[sessionId] : null
         if (response) {
-          setTimeout(() => this.__trigger('resumed', response), 0)
+          setTimeout(() => this.__trigger('resumed', {
+            ...response,
+            ...(payload.request_id ? { request_id: payload.request_id } : {}),
+          }), 0)
         }
       }
       return this

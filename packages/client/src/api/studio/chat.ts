@@ -160,6 +160,7 @@ export interface RunEvent {
 
 export interface ResumeSessionPayload {
   session_id: string
+  request_id?: string
   messages: any[]
   workspaceRunChanges?: import('./sessions').WorkspaceRunChangeSummary[]
   messageTotal?: number
@@ -200,6 +201,7 @@ export interface ResumeSessionPayload {
 // ============================
 
 let chatRunSocket: Socket | null = null
+let resumeRequestSequence = 0
 let globalListenersRegistered = false
 let chatRunSocketProfile: string | null = null
 export type ChatRunTransport = 'chat-run' | 'global-agent'
@@ -905,14 +907,16 @@ export function resumeSession(
   transport: ChatRunTransport = 'chat-run',
 ): Socket {
   const socket = connectChatRun(profile, transport)
+  const requestId = `resume-${++resumeRequestSequence}`
 
   const handleResumed = (data: ResumeSessionPayload) => {
     if (data?.session_id !== sessionId) return
+    if (data.request_id !== undefined && data.request_id !== requestId) return
     removeSocketListener(socket, 'resumed', handleResumed)
     onResumed(data)
   }
   socket.on('resumed', handleResumed)
-  socket.emit('resume', { session_id: sessionId, ...(profile ? { profile } : {}) })
+  socket.emit('resume', { session_id: sessionId, request_id: requestId, ...(profile ? { profile } : {}) })
 
   return socket
 }
@@ -958,15 +962,17 @@ export function startRunViaSocket(
 
   const emitReconnectResume = () => {
     clearReconnectResumeHandler()
+    const requestId = `resume-${++resumeRequestSequence}`
     if (options?.onReconnectResume) {
       reconnectResumeHandler = (data: ResumeSessionPayload) => {
+        if (data.session_id !== sid || (data.request_id !== undefined && data.request_id !== requestId)) return
         clearReconnectResumeHandler()
-        if (closed || data.session_id !== sid) return
+        if (closed) return
         options.onReconnectResume?.(data)
       }
       socket.on('resumed', reconnectResumeHandler)
     }
-    socket.emit('resume', { session_id: sid, ...(body.profile ? { profile: body.profile } : {}) })
+    socket.emit('resume', { session_id: sid, request_id: requestId, ...(body.profile ? { profile: body.profile } : {}) })
   }
 
   const handleSocketError = (err: Error) => {
